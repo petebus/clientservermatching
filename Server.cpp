@@ -1,11 +1,35 @@
 #include <cstdlib>
 #include <iostream>
+#include <queue>
 #include <boost/bind/bind.hpp>
 #include <boost/asio.hpp>
 #include "json.hpp"
 #include "Common.hpp"
 
 using boost::asio::ip::tcp;
+
+enum OrderType
+{
+	BUY,
+	SELL
+};
+struct OrderInfo
+{
+	std::string UserName;
+	OrderType Type;
+	int64_t Val_USD;
+	int64_t Val_RUB;
+};
+struct UserData
+{
+	UserData(const std::string& InUserName) : UserName(InUserName), Balance_USD(0), Balance_RUB(0)
+	{
+		
+	}
+	std::string UserName;
+	int64_t Balance_USD;
+	int64_t Balance_RUB;
+};
 
 class Core
 {
@@ -29,13 +53,27 @@ public:
         }
         else
         {
-            return userIt->second;
+            return userIt->second.UserName;
         }
     }
 
+	void AddNewOrder(const std::string& InUserID, const OrderType& InOrderType, const int64_t& InUSD, const int64_t InRUB)
+    {
+    	const auto userIt = mUsers.find(std::stoi(InUserID));
+    	if(userIt == mUsers.cend()) return;
+
+    	OrderInfo NewOrder;
+    	NewOrder.Type = InOrderType;
+    	NewOrder.UserName = GetUserName(InUserID);
+    	NewOrder.Val_USD = InUSD;
+    	NewOrder.Val_RUB = InRUB;
+    	Orders.push_back(NewOrder);
+    }
+	
 private:
-    // <UserId, UserName>
-    std::map<size_t, std::string> mUsers;
+	// <UserId, UserName>
+    std::map<size_t, UserData> mUsers;
+	std::list<OrderInfo> Orders;
 };
 
 Core& GetCore()
@@ -71,30 +109,40 @@ public:
     {
         if (!error)
         {
-            data_[bytes_transferred] = '\0';
-
             // Парсим json, который пришёл нам в сообщении.
+        	data_[bytes_transferred] = '\0';
+
             auto j = nlohmann::json::parse(data_);
             auto reqType = j["ReqType"];
-
-            std::string reply = "Error! Unknown request type";
+        	
+        	Reply NewReply;
+            NewReply.reply_body = "Error! Unknown request type";
             if (reqType == Requests::Registration)
             {
                 // Это реквест на регистрацию пользователя.
                 // Добавляем нового пользователя и возвращаем его ID.
-                reply = GetCore().RegisterNewUser(j["Message"]);
+                NewReply.reply_body = GetCore().RegisterNewUser(j["Message"]);
             }
             else if (reqType == Requests::Hello)
             {
                 // Это реквест на приветствие.
                 // Находим имя пользователя по ID и приветствуем его по имени.
-                reply = "Hello, " + GetCore().GetUserName(j["UserId"]) + "!\n";
+            	NewReply.user = GetCore().GetUserName(j["UserId"]);
+                NewReply.reply_body = "Hello, " + NewReply.user + "!\n";
+            }
+            else if (reqType == Requests::OrderAdd)
+            {
+	            
             }
 
-            boost::asio::async_write(socket_,
-                boost::asio::buffer(reply, reply.size()),
-                boost::bind(&session::handle_write, this,
-                    boost::asio::placeholders::error));
+        	replies_queue.push(NewReply);
+        	if(replies_queue.size() == 1)
+        	{
+        		boost::asio::async_write(socket_,
+					boost::asio::buffer(replies_queue.back().reply_body, replies_queue.back().reply_body.size()),
+					boost::bind(&session::handle_write, this,
+						boost::asio::placeholders::error));
+        	}
         }
         else
         {
@@ -106,10 +154,18 @@ public:
     {
         if (!error)
         {
-            socket_.async_read_some(boost::asio::buffer(data_, max_length),
-                boost::bind(&session::handle_read, this,
-                    boost::asio::placeholders::error,
-                    boost::asio::placeholders::bytes_transferred));
+        	replies_queue.pop();
+        	if(replies_queue.size() > 0)
+        	{
+        		boost::asio::async_write(socket_,
+					boost::asio::buffer(replies_queue.back().reply_body, replies_queue.back().reply_body.size()),
+					boost::bind(&session::handle_write, this,
+						boost::asio::placeholders::error));
+        	}
+        	socket_.async_read_some(boost::asio::buffer(data_, max_length),
+				boost::bind(&session::handle_read, this,
+					boost::asio::placeholders::error,
+					boost::asio::placeholders::bytes_transferred));
         }
         else
         {
@@ -118,9 +174,17 @@ public:
     }
 
 private:
-    tcp::socket socket_;
-    enum { max_length = 1024 };
-    char data_[max_length];
+	tcp::socket socket_;
+	enum { max_length = 1024 };
+	char data_[max_length];
+
+	struct Reply
+	{
+		std::string user;
+        std::string reply_body;
+	};
+
+	std::queue<Reply> replies_queue;
 };
 
 class server
