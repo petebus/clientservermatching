@@ -2,6 +2,7 @@
 #include <iostream>
 #include <queue>
 #include <boost/bind/bind.hpp>
+#include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
 #include "json.hpp"
 #include "Common.hpp"
@@ -22,6 +23,10 @@ struct OrderInfo
 };
 struct UserData
 {
+	UserData() : UserName(""), Balance_USD(0), Balance_RUB(0)
+	{
+		
+	}
 	UserData(const std::string& InUserName) : UserName(InUserName), Balance_USD(0), Balance_RUB(0)
 	{
 		
@@ -56,6 +61,18 @@ public:
             return userIt->second.UserName;
         }
     }
+    std::string GetUserBalance(const std::string& aUserId)
+    {
+        const auto userIt = mUsers.find(std::stoi(aUserId));
+        if (userIt == mUsers.cend())
+        {
+            return "Error! Unknown User";
+        }
+        else
+        {
+            return std::to_string(userIt->second.Balance_USD) + " USD " + std::to_string(userIt->second.Balance_RUB) + " RUB";
+        }
+    }
 
 	void AddNewOrder(const std::string& InUserID, const OrderType& InOrderType, const int64_t& InUSD, const int64_t InRUB)
     {
@@ -69,7 +86,7 @@ public:
     	NewOrder.Val_RUB = InRUB;
     	Orders.push_back(NewOrder);
     }
-	
+	const std::list<OrderInfo>& GetOrderList() const { return Orders; }
 private:
 	// <UserId, UserName>
     std::map<size_t, UserData> mUsers;
@@ -132,7 +149,44 @@ public:
             }
             else if (reqType == Requests::OrderAdd)
             {
-	            
+            	std::string Msg = j["Message"];
+            	std::vector<std::string> CommandList;
+            	boost::split(CommandList, Msg, boost::is_any_of(" "));
+					
+            	if(CommandList.size() < 3 || CommandList[0] != "BUY" && CommandList[0] != "SELL")
+            	{
+            		NewReply.reply_body = "Error: mismatching template";
+            	}
+            	else
+            	{
+            		const int64_t Amount_USD = std::atoi(CommandList[1].c_str());				
+            		const int64_t Amount_RUB = std::atoi(CommandList[2].c_str());
+            		
+            		GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? BUY : SELL, Amount_USD, Amount_RUB);
+            		NewReply.user = GetCore().GetUserName(j["UserId"]);
+            		NewReply.reply_body = "Order successfully added";
+
+            		/*Try to match order*/
+            	}
+            }
+            else if (reqType == Requests::Balance)
+            {
+            	NewReply.user = GetCore().GetUserName(j["UserId"]);
+            	NewReply.reply_body = "Balance is: " + GetCore().GetUserBalance(j["UserId"]);
+            }
+            else if (reqType == Requests::OrderList)
+            {
+            	NewReply.user = GetCore().GetUserName(j["UserId"]);
+            	for(const OrderInfo& Order: GetCore().GetOrderList())
+            	{
+            		if(Order.UserName == NewReply.user)
+            		{
+            			NewReply.reply_body += Order.Type == BUY ? "BUY " : "SELL ";
+            			NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
+            			NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
+            			NewReply.reply_body += "\n";
+            		}
+            	}
             }
 
         	replies_queue.push(NewReply);

@@ -10,7 +10,8 @@ namespace Requests
     static std::string Registration = "Reg";
     static std::string Hello = "Hel";
     static std::string OrderAdd = "AddOrder";
-	
+    static std::string Balance = "Bal";
+    static std::string OrderList = "List";
 }
 
 #endif //CLIENSERVERECN_COMMON_HPP
