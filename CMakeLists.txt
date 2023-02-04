@@ -7,17 +7,11 @@ INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIR})
 
 SET(CMAKE_CXX_STANDARD 17)
 
-ADD_EXECUTABLE(Server Server.cpp Common.hpp json.hpp)
+ADD_EXECUTABLE(Server main_server.cpp Server.cpp Server.hpp Common.hpp json.hpp)
 TARGET_LINK_LIBRARIES(Server PRIVATE Threads::Threads ${Boost_LIBRARIES})
-target_sources(Server
-    PUBLIC
-        Server.cpp)
 
-ADD_EXECUTABLE(Client Client.cpp Common.hpp json.hpp)
+ADD_EXECUTABLE(Client main_client.cpp Client.cpp Client.hpp Common.hpp json.hpp)
 TARGET_LINK_LIBRARIES(Client PRIVATE Threads::Threads ${Boost_LIBRARIES})
-target_sources(Client
-    PUBLIC
-        Client.cpp)
 
 ADD_EXECUTABLE(Test Test.cpp)
 ADD_DEPENDENCIES(Test Client Server)
