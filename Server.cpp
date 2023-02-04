@@ -6,6 +6,7 @@
 #include <boost/asio.hpp>
 #include "json.hpp"
 #include "Common.hpp"
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 using boost::asio::ip::tcp;
 
@@ -16,11 +17,12 @@ enum class OrderType
 };
 struct OrderInfo
 {
-	OrderInfo() : UserName(""), Type(OrderType::BUY), Val_USD(0), Val_RUB(0){ }
-	std::string UserName;
+	OrderInfo() : UserID(""), Type(OrderType::BUY), Val_USD(0), Val_RUB(0){ }
+	std::string UserID;
 	OrderType Type;
 	int64_t Val_USD;
 	int64_t Val_RUB;
+	boost::posix_time::ptime Timestamp;
 };
 struct UserData
 {
@@ -41,7 +43,6 @@ struct UserData
 class Core
 {
 public:
-    // "Регистрирует" нового пользователя и возвращает его ID.
     std::string RegisterNewUser(const std::string& aUserName)
     {
         size_t newUserId = mUsers.size();
@@ -50,8 +51,7 @@ public:
         return std::to_string(newUserId);
     }
 
-    // Запрос имени клиента по ID
-    std::string GetUserName(const std::string& aUserId)
+    std::string GetUsername(const std::string& aUserId)
     {
         const auto userIt = mUsers.find(std::stoi(aUserId));
         if (userIt == mUsers.cend())
@@ -75,6 +75,21 @@ public:
             return std::to_string(userIt->second.Balance_USD) + " USD " + std::to_string(userIt->second.Balance_RUB) + " RUB";
         }
     }
+    void GetUserBalanceValues(const std::string& aUserId, int64_t& OutUSD, int64_t& OutRUB)
+    {
+        const auto userIt = mUsers.find(std::stoi(aUserId));
+        if (userIt == mUsers.cend()) return;
+    	OutUSD = userIt->second.Balance_USD;
+    	OutRUB = userIt->second.Balance_RUB;
+    }
+	void UpdateUserBalance(const std::string& aUserId, const int64_t& InUSD,  const int64_t& InRUB)
+    {
+        const auto& userIt = mUsers.find(std::stoi(aUserId));
+        if (userIt == mUsers.cend()) return;
+
+    	userIt->second.Balance_USD = InUSD;
+    	userIt->second.Balance_RUB = InRUB;
+    }
 
 	void AddNewOrder(const std::string& InUserID, const OrderType& InOrderType, const int64_t& InUSD, const int64_t InRUB)
     {
@@ -83,9 +98,10 @@ public:
 
     	OrderInfo NewOrder;
     	NewOrder.Type = InOrderType;
-    	NewOrder.UserName = GetUserName(InUserID);
+    	NewOrder.UserID = InUserID;
     	NewOrder.Val_USD = InUSD;
     	NewOrder.Val_RUB = InRUB;
+    	NewOrder.Timestamp = boost::posix_time::second_clock::local_time();
     	Orders.insert(std::make_pair(LastOrderIdx, NewOrder));
     	userIt->second.OrderList.push_back(LastOrderIdx);
     	LastOrderIdx += 1;
@@ -98,6 +114,16 @@ public:
     	userIt->second.OrderList.remove(OrderID);
     	Orders.erase(OrderID);
     }
+	void UpdateOrderPrice(const uint64_t OrderID, const int64_t& InUSD)
+    {
+    	Orders[OrderID].Val_USD = InUSD;
+    	if(Orders[OrderID].Val_USD <= 0)
+    	{
+    		auto UserID = Orders[OrderID].UserID;
+    		RemoveOrder(UserID, OrderID);
+    	}
+    }
+
 	const std::unordered_map<uint64_t, OrderInfo>& GetOrderList() const { return Orders; }
 	
 	std::vector<uint64_t> GetUserOrdersIDList(const std::string& InUserID) const
@@ -114,7 +140,6 @@ public:
     	}
 	    return Result; 
     }
-	
 	std::vector<OrderInfo> GetUserOrderList(const std::string& InUserID) const
     {
     	std::vector<OrderInfo> Result;
@@ -139,8 +164,8 @@ private:
 
 Core& GetCore()
 {
-    static Core core;
-    return core;
+    static Core Core;
+    return Core;
 }
 
 class session
@@ -183,7 +208,7 @@ public:
             }
             else if (reqType == Requests::OrderRemove)
             {
-            	NewReply.user = GetCore().GetUserName(j["UserId"]);
+            	NewReply.user = GetCore().GetUsername(j["UserId"]);
                 NewReply.reply_body = "Order not found \n";
 
             	std::string Msg = j["Message"];
@@ -211,20 +236,20 @@ public:
             		const int64_t Amount_RUB = std::atoi(CommandList[2].c_str());
             		
             		GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? OrderType::BUY : OrderType::SELL, Amount_USD, Amount_RUB);
-            		NewReply.user = GetCore().GetUserName(j["UserId"]);
+            		NewReply.user = GetCore().GetUsername(j["UserId"]);
             		NewReply.reply_body = "Order successfully added";
 
-            		/*Try to match order*/
+            		OnOrderAdded(j["UserId"]);
             	}
             }
             else if (reqType == Requests::Balance)
             {
-            	NewReply.user = GetCore().GetUserName(j["UserId"]);
+            	NewReply.user = GetCore().GetUsername(j["UserId"]);
             	NewReply.reply_body = "Balance is: " + GetCore().GetUserBalance(j["UserId"]);
             }
             else if (reqType == Requests::OrderList)
             {
-            	NewReply.user = GetCore().GetUserName(j["UserId"]);
+            	NewReply.user = GetCore().GetUsername(j["UserId"]);
             	NewReply.reply_body = "OrderList:\n";
 
             	const auto OrderList = GetCore().GetUserOrderList(j["UserId"]);
@@ -236,6 +261,7 @@ public:
             		NewReply.reply_body += Order.Type == OrderType::BUY ? "BUY " : "SELL ";
             		NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
             		NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
+            		NewReply.reply_body += to_simple_string(Order.Timestamp);
             		NewReply.reply_body += "\n";
             	}
             }
@@ -257,38 +283,107 @@ public:
 
     void handle_write(const boost::system::error_code& error)
     {
-        if (!error)
-        {
-        	replies_queue.pop();
-        	if(replies_queue.size() > 0)
-        	{
-        		boost::asio::async_write(socket_,
+	    if (!error)
+	    {
+	    	replies_queue.pop();
+	    	if(replies_queue.size() > 0)
+	    	{
+	    		boost::asio::async_write(socket_,
 					boost::asio::buffer(replies_queue.back().reply_body, replies_queue.back().reply_body.size()),
 					boost::bind(&session::handle_write, this,
 						boost::asio::placeholders::error));
-        	}
-        	socket_.async_read_some(boost::asio::buffer(data_, max_length),
+	    	}
+	    	socket_.async_read_some(boost::asio::buffer(data_, max_length),
 				boost::bind(&session::handle_read, this,
 					boost::asio::placeholders::error,
 					boost::asio::placeholders::bytes_transferred));
-        }
-        else
-        {
-            delete this;
-        }
+	    }
+	    else
+	    {
+	    	delete this;
+	    }
     }
 
+	void OnOrderAdded(const std::string UserID)
+    {
+	    auto AddedOrderIdx = GetCore().GetUserOrdersIDList(UserID).back();
+    	auto& OrderList = GetCore().GetOrderList();
+    	auto& AddedOrderData = GetCore().GetOrderList().at(AddedOrderIdx);
+
+    	struct OrderInfoHolder
+    	{
+    		OrderInfoHolder() : OrderID(0), Info(OrderInfo()) {}
+    		OrderInfoHolder(const uint64_t& InOrderID, const OrderInfo& InOrderInfo) : OrderID(InOrderID), Info(InOrderInfo){}
+    		uint64_t OrderID;
+    		OrderInfo Info;
+    	};
+    	std::vector<OrderInfoHolder> Buffer;
+    	for(auto& Order : OrderList)
+    	{
+    		if(Order.first == AddedOrderIdx) continue;
+    		if(Order.second.Type == AddedOrderData.Type) continue;
+    		Buffer.push_back(OrderInfoHolder(Order.first, Order.second));
+    	}
+    	
+	    /*Sort orders by price (lower-> upper for buy, opposite for sell)*/
+    	std::sort(Buffer.begin(), Buffer.end(), [&](const OrderInfoHolder& Lhs, const OrderInfoHolder& Rhs)->bool
+    	{
+    		/*Take latest order*/
+    		if(Lhs.Info.Val_RUB == Rhs.Info.Val_RUB) return Lhs.Info.Timestamp < Rhs.Info.Timestamp;
+    		
+    		return AddedOrderData.Type == OrderType::BUY ?
+    			Lhs.Info.Val_RUB < Rhs.Info.Val_RUB :
+    			Lhs.Info.Val_RUB > Rhs.Info.Val_RUB;
+    	});
+
+    	for(auto& OrderToCompare : Buffer)
+    	{
+    		/*take min value, both orders should decrease their order to this*/
+    		auto DeltaValue = std::min(AddedOrderData.Val_USD, OrderToCompare.Info.Val_USD);
+
+    		auto FirstUserID = AddedOrderData.UserID;
+    		auto SecondUserID = OrderToCompare.Info.UserID;
+    		GetCore().UpdateOrderPrice(AddedOrderIdx, AddedOrderData.Val_USD - DeltaValue);
+    		GetCore().UpdateOrderPrice(OrderToCompare.OrderID, OrderToCompare.Info.Val_USD - DeltaValue);
+
+    		/*Update balances*/
+    		int64_t FirstUser_USD, FirstUser_RUB;
+    		int64_t SecondUser_USD, SecondUser_RUB;
+    		GetCore().GetUserBalanceValues(FirstUserID, FirstUser_USD, FirstUser_RUB);
+    		GetCore().GetUserBalanceValues(SecondUserID, SecondUser_USD, SecondUser_RUB);
+
+    		if(AddedOrderData.Type == OrderType::BUY)
+    		{
+    			GetCore().UpdateUserBalance(FirstUserID, FirstUser_USD + DeltaValue, FirstUser_RUB - DeltaValue * AddedOrderData.Val_RUB);
+    		}
+    		else
+    		{
+    			GetCore().UpdateUserBalance(FirstUserID, FirstUser_USD - DeltaValue, FirstUser_RUB + DeltaValue * OrderToCompare.Info.Val_RUB);
+    		}
+    		
+    		if(OrderToCompare.Info.Type == OrderType::BUY)
+    		{
+    			GetCore().UpdateUserBalance(SecondUserID, SecondUser_USD + DeltaValue, SecondUser_RUB - DeltaValue * OrderToCompare.Info.Val_RUB);
+    		}
+    		else
+    		{
+    			GetCore().UpdateUserBalance(SecondUserID, SecondUser_USD - DeltaValue, SecondUser_RUB + DeltaValue * AddedOrderData.Val_RUB);
+    		}
+
+    		/*if new order still active - continue*/
+    		if(AddedOrderData.Val_USD == 0) return;
+    	}
+    }
+	
 private:
 	tcp::socket socket_;
 	enum { max_length = 1024 };
 	char data_[max_length];
-
 	struct Reply
 	{
 		std::string user;
         std::string reply_body;
 	};
-
 	std::queue<Reply> replies_queue;
 };
 
@@ -313,6 +408,9 @@ public:
         if (!error)
         {
             new_session->start();
+
+        	/*do ping every N seconds*/
+        	
             new_session = new session(io_service_);
             acceptor_.async_accept(new_session->socket(),
                 boost::bind(&server::handle_accept, this, new_session,
@@ -334,10 +432,8 @@ int main()
     try
     {
         boost::asio::io_service io_service;
-        static Core core;
-
+        static Core Core;
         server s(io_service);
-
         io_service.run();
     }
     catch (std::exception& e)

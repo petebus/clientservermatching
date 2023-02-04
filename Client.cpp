@@ -56,11 +56,36 @@ int main()
 		tcp::socket s(io_service);
 		s.connect(*iterator);
 
-		// Мы предполагаем, что для идентификации пользователя будет использоваться ID.
-		// Тут мы "регистрируем" пользователя - отправляем на сервер имя, а сервер возвращает нам ID.
-		// Этот ID далее используется при отправке запросов.
-		std::string my_id = ProcessRegistration(s);
+		/*SendMessage(s, "0", Requests::Registration, "1");
+		std::string FirstClient = ReadMessage(s);
+		SendMessage(s, "0", Requests::Registration, "2");
+		std::string SecondClient = ReadMessage(s);
+		SendMessage(s, "0", Requests::Registration, "3");
+		std::string ThirdClient = ReadMessage(s);
 
+		SendMessage(s, FirstClient, Requests::OrderAdd, "BUY 10 62");
+		ReadMessage(s);
+		SendMessage(s, SecondClient, Requests::OrderAdd, "BUY 20 63");
+		ReadMessage(s);
+		SendMessage(s, ThirdClient, Requests::OrderAdd, "SELL 50 61");
+		ReadMessage(s);
+
+		SendMessage(s, FirstClient, Requests::OrderList, "");
+		std::cout << ReadMessage(s) << std::endl;
+		SendMessage(s, SecondClient, Requests::OrderList, "");
+		std::cout << ReadMessage(s) << std::endl;
+		SendMessage(s, ThirdClient, Requests::OrderList, "");
+		std::cout << ReadMessage(s) << std::endl;
+
+		SendMessage(s, FirstClient, Requests::Balance, "");
+		std::cout << ReadMessage(s) << std::endl;
+		SendMessage(s, SecondClient, Requests::Balance, "");
+		std::cout << ReadMessage(s) << std::endl;
+		SendMessage(s, ThirdClient, Requests::Balance, "");
+		std::cout << ReadMessage(s) << std::endl;
+		return 0;*/
+		
+		std::string my_id = ProcessRegistration(s);
 		while (true)
 		{
 			// Тут реализовано "бесконечное" меню.
