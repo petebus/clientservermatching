@@ -9,13 +9,14 @@
 
 using boost::asio::ip::tcp;
 
-enum OrderType
+enum class OrderType
 {
 	BUY,
 	SELL
 };
 struct OrderInfo
 {
+	OrderInfo() : UserName(""), Type(OrderType::BUY), Val_USD(0), Val_RUB(0){ }
 	std::string UserName;
 	OrderType Type;
 	int64_t Val_USD;
@@ -34,6 +35,7 @@ struct UserData
 	std::string UserName;
 	int64_t Balance_USD;
 	int64_t Balance_RUB;
+	std::list<uint64_t> OrderList;
 };
 
 class Core
@@ -76,7 +78,7 @@ public:
 
 	void AddNewOrder(const std::string& InUserID, const OrderType& InOrderType, const int64_t& InUSD, const int64_t InRUB)
     {
-    	const auto userIt = mUsers.find(std::stoi(InUserID));
+    	const auto& userIt = mUsers.find(std::stoi(InUserID));
     	if(userIt == mUsers.cend()) return;
 
     	OrderInfo NewOrder;
@@ -84,13 +86,55 @@ public:
     	NewOrder.UserName = GetUserName(InUserID);
     	NewOrder.Val_USD = InUSD;
     	NewOrder.Val_RUB = InRUB;
-    	Orders.push_back(NewOrder);
+    	Orders.insert(std::make_pair(LastOrderIdx, NewOrder));
+    	userIt->second.OrderList.push_back(LastOrderIdx);
+    	LastOrderIdx += 1;
     }
-	const std::list<OrderInfo>& GetOrderList() const { return Orders; }
+	void RemoveOrder(const std::string& InUserID, const uint64_t OrderID)
+    {
+    	const auto& userIt = mUsers.find(std::stoi(InUserID));
+    	if(userIt == mUsers.cend()) return;
+
+    	userIt->second.OrderList.remove(OrderID);
+    	Orders.erase(OrderID);
+    }
+	const std::unordered_map<uint64_t, OrderInfo>& GetOrderList() const { return Orders; }
+	
+	std::vector<uint64_t> GetUserOrdersIDList(const std::string& InUserID) const
+    {
+    	std::vector<uint64_t> Result;
+    	const auto userIt = mUsers.find(std::stoi(InUserID));
+    	if (userIt == mUsers.cend())
+    	{
+    		return Result;
+    	}
+    	for(auto OrderID : userIt->second.OrderList)
+    	{
+    		Result.push_back(OrderID);
+    	}
+	    return Result; 
+    }
+	
+	std::vector<OrderInfo> GetUserOrderList(const std::string& InUserID) const
+    {
+    	std::vector<OrderInfo> Result;
+    	const auto userIt = mUsers.find(std::stoi(InUserID));
+    	if (userIt == mUsers.cend())
+    	{
+    		return Result;
+    	}
+    	for(auto OrderID : userIt->second.OrderList)
+    	{
+    		Result.push_back(Orders.at(OrderID));
+    	}
+    	return Result;
+    }
+	
 private:
 	// <UserId, UserName>
     std::map<size_t, UserData> mUsers;
-	std::list<OrderInfo> Orders;
+	std::unordered_map<uint64_t, OrderInfo> Orders;
+	uint64_t LastOrderIdx = 0;
 };
 
 Core& GetCore()
@@ -120,13 +164,12 @@ public:
                 boost::asio::placeholders::bytes_transferred));
     }
 
-    // Обработка полученного сообщения.
     void handle_read(const boost::system::error_code& error,
         size_t bytes_transferred)
     {
         if (!error)
         {
-            // Парсим json, который пришёл нам в сообщении.
+        	/*Parse json*/
         	data_[bytes_transferred] = '\0';
 
             auto j = nlohmann::json::parse(data_);
@@ -136,16 +179,21 @@ public:
             NewReply.reply_body = "Error! Unknown request type";
             if (reqType == Requests::Registration)
             {
-                // Это реквест на регистрацию пользователя.
-                // Добавляем нового пользователя и возвращаем его ID.
                 NewReply.reply_body = GetCore().RegisterNewUser(j["Message"]);
             }
-            else if (reqType == Requests::Hello)
+            else if (reqType == Requests::OrderRemove)
             {
-                // Это реквест на приветствие.
-                // Находим имя пользователя по ID и приветствуем его по имени.
             	NewReply.user = GetCore().GetUserName(j["UserId"]);
-                NewReply.reply_body = "Hello, " + NewReply.user + "!\n";
+                NewReply.reply_body = "Order not found \n";
+
+            	std::string Msg = j["Message"];
+				int64_t OrderIdx = std::atoi(Msg.c_str());
+            	const auto OrderList = GetCore().GetUserOrdersIDList(j["UserId"]);
+            	if(OrderIdx >= 0 && OrderList.size() > OrderIdx)
+            	{
+            		GetCore().RemoveOrder(j["UserId"], OrderList[OrderIdx]);
+            		NewReply.reply_body = "Order was removed successfully \n";
+            	}
             }
             else if (reqType == Requests::OrderAdd)
             {
@@ -162,7 +210,7 @@ public:
             		const int64_t Amount_USD = std::atoi(CommandList[1].c_str());				
             		const int64_t Amount_RUB = std::atoi(CommandList[2].c_str());
             		
-            		GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? BUY : SELL, Amount_USD, Amount_RUB);
+            		GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? OrderType::BUY : OrderType::SELL, Amount_USD, Amount_RUB);
             		NewReply.user = GetCore().GetUserName(j["UserId"]);
             		NewReply.reply_body = "Order successfully added";
 
@@ -177,15 +225,18 @@ public:
             else if (reqType == Requests::OrderList)
             {
             	NewReply.user = GetCore().GetUserName(j["UserId"]);
-            	for(const OrderInfo& Order: GetCore().GetOrderList())
+            	NewReply.reply_body = "OrderList:\n";
+
+            	const auto OrderList = GetCore().GetUserOrderList(j["UserId"]);
+            	for(uint64_t OrderIt = 0; OrderIt < OrderList.size(); OrderIt++)
             	{
-            		if(Order.UserName == NewReply.user)
-            		{
-            			NewReply.reply_body += Order.Type == BUY ? "BUY " : "SELL ";
-            			NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
-            			NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
-            			NewReply.reply_body += "\n";
-            		}
+            		NewReply.reply_body += std::to_string(OrderIt) + " ";
+
+            		const OrderInfo& Order = OrderList[OrderIt];
+            		NewReply.reply_body += Order.Type == OrderType::BUY ? "BUY " : "SELL ";
+            		NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
+            		NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
+            		NewReply.reply_body += "\n";
             	}
             }
 

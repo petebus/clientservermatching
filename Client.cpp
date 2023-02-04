@@ -65,11 +65,11 @@ int main()
 		{
 			// Тут реализовано "бесконечное" меню.
 			std::cout << "Menu:\n"
-						 "1) Hello Request\n"
-						 "2) Add order\n"
+						 "1) Add order\n"
+						 "2) Remove order\n"
 						 "3) Balance\n"
 						 "4) Order List\n"
-						 "3) Exit\n"
+						 "5) Exit\n"
 						 << std::endl;
 
 			short menu_option_num;
@@ -77,16 +77,6 @@ int main()
 			switch (menu_option_num)
 			{
 				case 1:
-				{
-					// Для примера того, как может выглядить взаимодействие с сервером
-					// реализован один единственный метод - Hello.
-					// Этот метод получает от сервера приветствие с именем клиента,
-					// отправляя серверу id, полученный при регистрации.
-					SendMessage(s, my_id, Requests::Hello, "");
-					std::cout << ReadMessage(s);
-					break;
-				}
-				case 2:
 				{
 					/*Add order logic*/
 					std::cout << "Write order data in format: BUY/SELL USD_VAL RUB_VAL " << std::endl;
@@ -98,6 +88,22 @@ int main()
 					SendMessage(s, my_id, Requests::OrderAdd, command);
 					std::cout << ReadMessage(s) << std::endl;
 
+					break;
+				}
+				case 2:
+				{
+					std::cout << "Which order you want to remove?" << std::endl;
+					int32_t OrderIdx = -1;
+					std::cin >> OrderIdx;
+					if(OrderIdx == -1)
+					{
+						std::cout << "Wrong input" << std::endl;
+						break;
+					}
+					
+					SendMessage(s, my_id, Requests::OrderRemove, std::to_string(OrderIdx));
+					std::cout << ReadMessage(s) << std::endl;
+					
 					break;
 				}
 				case 3:
@@ -120,6 +126,8 @@ int main()
 				default:
 				{
 					std::cout << "Unknown menu option\n" << std::endl;
+					std::cin.clear();
+					std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 				}
 			}
 		}
