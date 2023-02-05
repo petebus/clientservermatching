@@ -23,7 +23,12 @@ public:
 	string Authorize(const std::string& Username, const std::string& Password);
     string Register(const std::string& InUsername, const std::string& InPassword);
 	bool IsAuthorized();
-	const atomic_bool& IsConnected() const { return bConnected; }
+	const atomic_bool& IsConnected() { return bConnected; }
+
+	string AddOrder(const std::string& OrderData);
+	string RemoveOrder(const std::string& OrderIdx);
+	string GetBalance();
+	string GetOrderList();
 	
 private:
 	void Send(const std::string& aRequestType, const std::string& aMessage);
@@ -34,4 +39,6 @@ private:
 	void SendPing();
 
 	atomic_bool bConnected = false;
+
+	std::mutex Lock;
 };

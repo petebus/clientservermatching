@@ -10,8 +10,8 @@ namespace Requests
     static std::string Registration = "Reg";
     static std::string AuthCheck = "IsAuth";
     static std::string Ping = "Ping";
-    static std::string OrderAdd = "Add";
-    static std::string OrderRemove = "Rem";
+    static std::string AddOrder = "Add";
+    static std::string RemoveOrder = "Rem";
     static std::string Balance = "Bal";
     static std::string OrderList = "Lst";
 }

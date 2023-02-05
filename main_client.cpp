@@ -94,7 +94,7 @@ int main()
 
 			short menu_option_num;
 			std::cin >> menu_option_num;
-			/*switch (menu_option_num)
+			switch (menu_option_num)
 			{
 			case 1:
 			{
@@ -104,14 +104,13 @@ int main()
 				std::cin.ignore();
 				std::getline(std::cin, command);
 
-				cl.Send(Requests::OrderAdd, command);
-				std::cout << cl.ReadMessage() << std::endl;
+				std::cout << cl.AddOrder(command) << std::endl;
 
 				break;
 			}
 			case 2:
 			{
-				std::cout << "Which order you want to remove?" << std::endl;
+				/*std::cout << "Which order you want to remove?" << std::endl;
 				int32_t OrderIdx = -1;
 				std::cin >> OrderIdx;
 				if (OrderIdx == -1)
@@ -121,20 +120,19 @@ int main()
 				}
 
 				cl.Send(Requests::OrderRemove, std::to_string(OrderIdx));
-				std::cout << cl.ReadMessage() << std::endl;
+				std::cout << cl.ReadMessage() << std::endl;*/
 
 				break;
 			}
 			case 3:
 			{
-				cl.Send(Requests::Balance, "");
-				std::cout << cl.ReadMessage() << std::endl;
+				std::cout << cl.GetBalance() << std::endl;
 				break;
 			}
 			case 4:
 			{
-				cl.Send(Requests::OrderList, "");
-				std::cout << cl.ReadMessage() << std::endl;
+				/*cl.Send(Requests::OrderList, "");
+				std::cout << cl.ReadMessage() << std::endl;*/
 				break;
 			}
 			case 5:
@@ -148,7 +146,7 @@ int main()
 				std::cin.clear();
 				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 			}
-			}*/
+			}
 		}
 	}
 	catch (std::exception& e)

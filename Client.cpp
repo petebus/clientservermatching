@@ -27,6 +27,7 @@ std::string Client::ReadMessage()
 
 void Client::SendPing()
 {
+	const std::lock_guard LockGuard(Lock);
 	Send(Requests::Ping, "");
 	std::string Result = ReadMessage();
 	if(Result == "OK")
@@ -38,11 +39,11 @@ void Client::SendPing()
 	else
 	{
 		std::cout << "Connection is failed" << std::endl;
-		return;
 	}
 }
 std::string Client::Authorize(const std::string& Username, const std::string& Password)
 {
+	const std::lock_guard LockGuard(Lock);
 	Send(Requests::Authorization, Username + " " + Password);
 	std::string Result = ReadMessage();
 	if(Result == "OK")
@@ -53,6 +54,7 @@ std::string Client::Authorize(const std::string& Username, const std::string& Pa
 }
 std::string Client::Register(const std::string& InUsername, const std::string& InPassword)
 {
+	const std::lock_guard LockGuard(Lock);
     Send(Requests::Registration, InUsername + " " + InPassword);
 	std::string Result = ReadMessage();
 	if(Result == "OK")
@@ -63,9 +65,42 @@ std::string Client::Register(const std::string& InUsername, const std::string& I
 }
 bool Client::IsAuthorized()
 {
+	const std::lock_guard LockGuard(Lock);
 	Send(Requests::AuthCheck, "");
 	std::string Result = ReadMessage();
 	return Result == "YES";
+}
+
+string Client::AddOrder(const std::string &OrderData)
+{
+	const std::lock_guard LockGuard(Lock);
+	Send(Requests::AddOrder, OrderData);
+	std::string Result = ReadMessage();
+	return Result;
+}
+
+string Client::RemoveOrder(const std::string &OrderIdx)
+{
+	const std::lock_guard LockGuard(Lock);
+	Send(Requests::RemoveOrder, OrderIdx);
+	std::string Result = ReadMessage();
+	return Result;
+}
+
+string Client::GetOrderList()
+{
+	const std::lock_guard LockGuard(Lock);
+	Send(Requests::OrderList, "");
+	std::string Result = ReadMessage();
+	return Result;
+}
+
+string Client::GetBalance()
+{
+	const std::lock_guard LockGuard(Lock);
+	Send(Requests::Balance, "");
+	std::string Result = ReadMessage();
+	return Result;
 }
 
 void Client::Connect()

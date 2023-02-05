@@ -24,7 +24,8 @@ public:
 
     void Start();
 	bool IsAuthorized() const { return bAuthorized; }
-
+	const uint32_t& GetUserID() const { return UserID; }
+	
 private:
     void handle_read(const boost::system::error_code& error, size_t bytes_transferred);
     void handle_write(const boost::system::error_code& error);
@@ -33,7 +34,7 @@ private:
 	void Callback(std::string Result);
 	
 	/*Authorization*/
-	std::string my_id;
+	uint32_t UserID;
 	bool bAuthorized = false;
 
 	/*Connection data*/
@@ -49,6 +50,8 @@ private:
     char DataBuffer[MaxBufferLength];
 
 	std::string Output;
+
+	std::mutex Lock;
 };
 
 typedef boost::function<void (ClientSession*, std::string)> ExecuteSignature;
@@ -91,7 +94,7 @@ private:
     boost::asio::io_service& io_service_;
     tcp::acceptor acceptor_;
 
-   struct QueuedRequest
+    struct QueuedRequest
     {
 	    QueuedRequest() = delete;
     	QueuedRequest(ClientSession* InSession, ExecuteSignature InExecuteMethod, CallbackSignature InSessionCallback) :
@@ -103,5 +106,8 @@ private:
     	ExecuteSignature ExecuteMethod;
 		CallbackSignature SessionCallback;
     };
+
+public:
 	std::queue<QueuedRequest> RequestQueue;
+	std::mutex RequestLock;
 };

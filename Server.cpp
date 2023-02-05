@@ -22,20 +22,22 @@ void ClientSession::Start()
 #define MAKE_SIMPLE_CALLBACK_REQUEST(Server, ExecuteName, Message) \
 { \
 	(Server)->Request(this, Message, \
-		boost::bind(&server::Execute_##ExecuteName, Server, this, Message), \
-		boost::bind(&ClientSession::Callback, this, ""));\
+		boost::bind(&server::Execute_##ExecuteName, Server, this, boost::placeholders::_2), \
+		boost::bind(&ClientSession::Callback, this, boost::placeholders::_1));\
 }\
 
 #define MAKE_LABMDA_CALLBACK_REQUEST(Server, ExecuteName, Message, Lambda) \
 { \
 	(Server)->Request(this, Message, \
-		boost::bind(&server::Execute_##ExecuteName, Server, this, Message), \
-		Lambda);\
+		boost::bind(&server::Execute_##ExecuteName, Server, this, boost::placeholders::_2), \
+		boost::bind(Lambda, boost::placeholders::_1));\
 }\
 
 void ClientSession::handle_read(const boost::system::error_code& error,
     size_t bytes_transferred)
 {
+	const std::lock_guard LockGuard(Lock);
+
     if (!error)
     {
 	    /*Parse json*/
@@ -62,48 +64,53 @@ void ClientSession::handle_read(const boost::system::error_code& error,
     	}
     	else if (reqType == Requests::Registration)
     	{
-    		MAKE_LABMDA_CALLBACK_REQUEST(OuterServer, Registration, j["Message"], [&](std::string Result)
-			{
+    		CallbackSignature Lambda = [&](std::string Result)
+    		{
     			std::vector<std::string> CommandList;
-				boost::split(CommandList, Result, boost::is_any_of(" "));
+    			boost::split(CommandList, Result, boost::is_any_of(" "));
     			if(CommandList.size() == 2 && CommandList[0] == "OK")
     			{
     				bAuthorized = true;
-    				my_id = std::atoi(CommandList[1].c_str());
-    				Callback("OK");
+    				UserID = std::atoi(CommandList[1].c_str());
+
+    				std::string res = "OK";
+    				Callback(res);
     			}
     			else
     			{
     				Callback(Result);
     			}
-			})
+    		};
+    		MAKE_LABMDA_CALLBACK_REQUEST(OuterServer, Registration, j["Message"], Lambda)
     		return;
     	}
     	else if(reqType == Requests::Authorization)
     	{
-    		MAKE_LABMDA_CALLBACK_REQUEST(OuterServer, Authorization, j["Message"], [&](std::string Result)
-			{
-				std::vector<std::string> CommandList;
-				boost::split(CommandList, Result, boost::is_any_of(" "));
-				if(CommandList.size() == 2 && CommandList[0] == "OK")
-				{
-					bAuthorized = true;
-					my_id = std::atoi(CommandList[1].c_str());
-					Callback("OK");
-				}
-				else
-				{
-					Callback(Result);
-				}
-			})
+    		CallbackSignature Lambda = [&](std::string Result)
+    		{
+    			std::vector<std::string> CommandList;
+    			boost::split(CommandList, Result, boost::is_any_of(" "));
+    			if(CommandList.size() == 2 && CommandList[0] == "OK")
+    			{
+    				bAuthorized = true;
+    				UserID = std::atoi(CommandList[1].c_str());
+    				std::string res = "OK";
+    				Callback(res);
+    			}
+    			else
+    			{
+    				Callback(Result);
+    			}
+    		};
+    		MAKE_LABMDA_CALLBACK_REQUEST(OuterServer, Authorization, j["Message"], Lambda);
     		return;
     	}
-    	else if (reqType == Requests::OrderRemove)
+    	else if (reqType == Requests::RemoveOrder)
     	{
     		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, RemoveOrder, j["Message"]);
 			return;
     	}
-    	else if (reqType == Requests::OrderAdd)
+    	else if (reqType == Requests::AddOrder)
     	{
     		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, AddOrder, j["Message"]);
 			return;
@@ -149,6 +156,7 @@ void ClientSession::handle_write(const boost::system::error_code& error)
 }
 void ClientSession::handle_connection_timeout(const boost::system::error_code& error)
 {
+	const std::lock_guard LockGuard(Lock);
 	if(error.failed()) return;
 	std::cout << "Connection is lost" << std::endl;
 }
@@ -256,6 +264,8 @@ void server::handle_end_connection(ClientSession *InSession)
 void server::Request(ClientSession* InSession, std::string Msg, ExecuteSignature InExecuteMethod,
 	CallbackSignature SessionCallback)
 {
+	const std::lock_guard LockGuard(RequestLock);
+	
 	RequestQueue.push(QueuedRequest(InSession, InExecuteMethod, SessionCallback));
 	if(RequestQueue.front().Session)
 	{
@@ -266,38 +276,43 @@ void server::Request(ClientSession* InSession, std::string Msg, ExecuteSignature
 
 void server::Execute_AddOrder(ClientSession* InSession, std::string Msg)
 {
-	std::string reply_body = "Order not found \n";
-	int64_t OrderIdx = std::atoi(Msg.c_str());
+	std::vector<std::string> CommandList;
+	boost::split(CommandList, Msg, boost::is_any_of(" "));
 
-	/*std::string Msg = j["Message"];
-			std::vector<std::string> CommandList;
-			boost::split(CommandList, Msg, boost::is_any_of(" "));
+	std::string reply_body = "Unknown error";
+	if (CommandList.size() < 3 || CommandList[0] != "BUY" && CommandList[0] != "SELL")
+	{
+		reply_body = "Error: mismatching template";
+	}
+	else
+	{
+		const int64_t Value = std::atoi(CommandList[1].c_str());
+		const int64_t Price = std::atoi(CommandList[2].c_str());
+		
+		/*add order to order table*/
+		SQL_Request("INSERT INTO orders (type, value, price, user_id) VALUES ('%s', %i, %i, %i)",
+			CommandList[0].c_str(), Value, Price, InSession->GetUserID(), boost::posix_time::microsec_clock::universal_time());
 
-			if (CommandList.size() < 3 || CommandList[0] != "BUY" && CommandList[0] != "SELL")
-			{
-				NewReply.reply_body = "Error: mismatching template";
-			}
-			else
-			{
-				const int64_t Amount_USD = std::atoi(CommandList[1].c_str());
-				const int64_t Amount_RUB = std::atoi(CommandList[2].c_str());
-
-				GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? OrderType::BUY : OrderType::SELL, Amount_USD, Amount_RUB);
-				NewReply.user = GetCore().GetUsername(j["UserId"]);
-				NewReply.reply_body = "Order successfully added";
-
-				OnOrderAdded(j["UserId"]);
-			}*/
+		auto r = SQL_Request("SELECT COUNT(*) FROM orders");
+		
+		/*add order to user list*/
+		SQL_Request("UPDATE users SET active_orders = ARRAY[%d] || active_orders WHERE id = %d", r.affected_rows(), InSession->GetUserID());
+		reply_body = "Order successfully added";
+		
+		//OnOrderAdded(j["UserId"]);
+	}
+	RequestQueue.front().SessionCallback(reply_body);
 }
-
 void server::Execute_RemoveOrder(ClientSession* InSession, std::string Msg)
 {
+	std::string reply_body = "Unknown error \n";
 	/*const auto OrderList = GetCore().GetUserOrdersIDList(j["UserId"]);
 	if (OrderIdx >= 0 && OrderList.size() > OrderIdx)
 	{
 		GetCore().RemoveOrder(j["UserId"], OrderList[OrderIdx]);
 		NewReply.reply_body = "Order was removed successfully \n";
 	}*/
+	RequestQueue.front().SessionCallback(reply_body);
 }
 
 void server::Execute_Registration(ClientSession* InSession, std::string Msg)
@@ -309,16 +324,16 @@ void server::Execute_Registration(ClientSession* InSession, std::string Msg)
 	boost::split(CommandList, Msg, boost::is_any_of(" "));
         	
 	/*if username is empty - allow to create*/
-	pqxx::result r = SQL_Request("SELECT username FROM users WHERE username = '%s'", CommandList[0]);
+	pqxx::result r = SQL_Request("SELECT id FROM users WHERE username = '%s'", CommandList[0].c_str());
 	if(r.affected_rows() == 0)
 	{
 		r = SQL_Request("SELECT MAX(id) FROM users");
 		uint64_t ID = 0;
 		if(!r.empty())
 		{
-			ID = std::atoi(r[0][0].c_str());
+			ID = std::atoi(r[0][0].c_str()) + 1;
 		}
-		SQL_Request("INSERT INTO users (id, username, password) VALUES ({},'{}','{}')", ID, CommandList[0], CommandList[1]);
+		SQL_Request("INSERT INTO users (id, username, password) VALUES (%d,'%s','%s')", ID, CommandList[0].c_str(), CommandList[1].c_str());
 		Transaction->commit();
 		reply_body = "OK " + std::to_string(ID);
 	}
@@ -328,7 +343,6 @@ void server::Execute_Registration(ClientSession* InSession, std::string Msg)
 	}
 	RequestQueue.front().SessionCallback(reply_body);
 }
-
 void server::Execute_Authorization(ClientSession *InSession, std::string Msg)
 {
 	std::vector<std::string> CommandList;
@@ -349,10 +363,21 @@ void server::Execute_Authorization(ClientSession *InSession, std::string Msg)
 	RequestQueue.front().SessionCallback(reply_body);
 }
 
-void server::Execute_Balance(ClientSession *InSession, std::string Msg)
+void server::Execute_Balance(ClientSession* InSession, std::string Msg)
 {
-	/*NewReply.user = GetCore().GetUsername(j["UserId"]);
-			NewReply.reply_body = "Balance is: " + GetCore().GetUserBalance(j["UserId"]);*/
+	auto User = InSession->GetUserID();
+	std::string reply_body = "Unknown error \n";
+
+	pqxx::result r = SQL_Request("SELECT balance_usd, balance_rub FROM users WHERE id = '%d'", User);
+	if(r.affected_rows() != 0)
+	{
+		reply_body = std::format("USD: {} RUB: {}", r[0][0].c_str(), r[0][1].c_str());
+	}
+	else
+	{
+		reply_body = "Error: wrong username or pass";
+	}
+	RequestQueue.front().SessionCallback(reply_body);
 }
 
 void server::Execute_OrderList(ClientSession *InSession, std::string Msg)
