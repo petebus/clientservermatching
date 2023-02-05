@@ -80,6 +80,7 @@ void Client::Connect()
 	PingTimer = new boost::asio::deadline_timer(io_service, boost::posix_time::seconds(1));
 	PingTimer->async_wait(boost::bind(&Client::SendPing, this));
 
+	bConnected = true;
 	io_service.run();
 }
 

@@ -10,7 +10,11 @@ int main()
 
 	try
 	{
-		cl.Connect();
+		std::thread thread1{[&cl]()
+		{
+			cl.Connect();
+		}};
+		while(!cl.IsConnected()){}
 		
 		/*Authorization menu*/
 		while(!cl.IsAuthorized())

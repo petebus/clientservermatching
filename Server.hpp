@@ -47,7 +47,8 @@ private:
 	
 	/*Buffer for reading*/
     char DataBuffer[MaxBufferLength];
-	
+
+	std::string Output;
 };
 
 typedef boost::function<void (ClientSession*, std::string)> ExecuteSignature;

@@ -23,7 +23,8 @@ public:
 	string Authorize(const std::string& Username, const std::string& Password);
     string Register(const std::string& InUsername, const std::string& InPassword);
 	bool IsAuthorized();
-
+	const atomic_bool& IsConnected() const { return bConnected; }
+	
 private:
 	void Send(const std::string& aRequestType, const std::string& aMessage);
 	string ReadMessage();
@@ -31,4 +32,6 @@ private:
 	/*Ping*/
 	boost::asio::deadline_timer* PingTimer = nullptr;
 	void SendPing();
+
+	atomic_bool bConnected = false;
 };

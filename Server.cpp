@@ -14,7 +14,7 @@ void ClientSession::Start()
         boost::bind(&ClientSession::handle_read, this,
             boost::asio::placeholders::error,
             boost::asio::placeholders::bytes_transferred));
-
+	
 	PingTimeoutHandle = new boost::asio::deadline_timer(io_service, boost::posix_time::milliseconds(ConnectionTimeoutDelay));
 	PingTimeoutHandle->async_wait(boost::bind(&ClientSession::handle_connection_timeout, this, boost::asio::placeholders::error));
 }
@@ -68,6 +68,7 @@ void ClientSession::handle_read(const boost::system::error_code& error,
 				boost::split(CommandList, Result, boost::is_any_of(" "));
     			if(CommandList.size() == 2 && CommandList[0] == "OK")
     			{
+    				bAuthorized = true;
     				my_id = std::atoi(CommandList[1].c_str());
     				Callback("OK");
     			}
@@ -86,6 +87,7 @@ void ClientSession::handle_read(const boost::system::error_code& error,
 				boost::split(CommandList, Result, boost::is_any_of(" "));
 				if(CommandList.size() == 2 && CommandList[0] == "OK")
 				{
+					bAuthorized = true;
 					my_id = std::atoi(CommandList[1].c_str());
 					Callback("OK");
 				}
@@ -125,8 +127,9 @@ void ClientSession::handle_read(const boost::system::error_code& error,
 }
 void ClientSession::Callback(std::string Result)
 {
+	Output = Result;
 	boost::asio::async_write(Socket,
-				boost::asio::buffer(Result, Result.size()),
+				boost::asio::buffer(Output, Output.size()),
 				boost::bind(&ClientSession::handle_write, this,
 					boost::asio::placeholders::error));
 }
@@ -224,6 +227,9 @@ server::server(boost::asio::io_service& io_service)
     acceptor_.async_accept(new_session->GetSocket(),
         boost::bind(&server::handle_accept, this, new_session,
             boost::asio::placeholders::error));
+
+	ConnectionObject = new pqxx::connection(connectionString.c_str());
+	Transaction = new pqxx::work(*ConnectionObject);
 }
 void server::handle_accept(ClientSession* new_session, const boost::system::error_code& error)
 {
@@ -320,7 +326,7 @@ void server::Execute_Registration(ClientSession* InSession, std::string Msg)
 	{
 		reply_body = "Error: name is already created";
 	}
-	//RequestQueue.front().SessionCallback(reply_body);
+	RequestQueue.front().SessionCallback(reply_body);
 }
 
 void server::Execute_Authorization(ClientSession *InSession, std::string Msg)
@@ -340,7 +346,7 @@ void server::Execute_Authorization(ClientSession *InSession, std::string Msg)
 	{
 		reply_body = "Error: wrong username or pass";
 	}
-	//RequestQueue.front().SessionCallback(reply_body);
+	RequestQueue.front().SessionCallback(reply_body);
 }
 
 void server::Execute_Balance(ClientSession *InSession, std::string Msg)
