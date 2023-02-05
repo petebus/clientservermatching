@@ -1,6 +1,9 @@
 #include <iostream>
 #include "Client.hpp"
 #include <boost/algorithm/string.hpp>
+
+#include "Common.hpp"
+
 int main()
 {
 	Client cl;
@@ -8,6 +11,7 @@ int main()
 	try
 	{
 		cl.Connect();
+		
 		/*Authorization menu*/
 		while(!cl.IsAuthorized())
 		{
@@ -57,7 +61,7 @@ int main()
 						break;
 					}
 					
-					std::string Result = cl.ProcessRegistration(CommandList[0], CommandList[1]);
+					std::string Result = cl.Register(CommandList[0], CommandList[1]);
 					if(!cl.IsAuthorized())
 					{
 						std::cout << Result << endl;
@@ -72,9 +76,10 @@ int main()
 				}
 			}
 		}
-		while (true)
+
+		/*Main navigation*/
+		while (cl.IsAuthorized())
 		{
-			// Тут реализовано "бесконечное" меню.
 			std::cout << "Menu:\n"
 				"1) Add order\n"
 				"2) Remove order\n"
@@ -85,11 +90,10 @@ int main()
 
 			short menu_option_num;
 			std::cin >> menu_option_num;
-			switch (menu_option_num)
+			/*switch (menu_option_num)
 			{
 			case 1:
 			{
-				/*Add order logic*/
 				std::cout << "Write order data in format: BUY/SELL USD_VAL RUB_VAL " << std::endl;
 				std::string command;
 
@@ -140,7 +144,7 @@ int main()
 				std::cin.clear();
 				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 			}
-			}
+			}*/
 		}
 	}
 	catch (std::exception& e)

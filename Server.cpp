@@ -1,285 +1,141 @@
 #include "Server.hpp"
-
+#include <iostream>
+#include <boost/asio.hpp>
 #include <pqxx/connection.hxx>
 #include <pqxx/transaction.hxx>
+#include <boost/bind/bind.hpp>
+#include <boost/algorithm/string.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include "Common.hpp"
 
-std::string Core::RegisterNewUser(const std::string& aUserName)
+void ClientSession::Start()
 {
-    size_t newUserId = mUsers.size();
-    mUsers[newUserId] = aUserName;
-
-    return std::to_string(newUserId);
-}
-
-std::string Core::GetUsername(const std::string& aUserId)
-{
-    const auto userIt = mUsers.find(std::stoi(aUserId));
-    if (userIt == mUsers.cend())
-    {
-        return "Error! Unknown User";
-    }
-    else
-    {
-        return userIt->second.UserName;
-    }
-}
-
-std::string Core::GetUserBalance(const std::string& aUserId)
-{
-    const auto userIt = mUsers.find(std::stoi(aUserId));
-    if (userIt == mUsers.cend())
-    {
-        return "Error! Unknown User";
-    }
-    else
-    {
-        return std::to_string(userIt->second.Balance_USD) + " USD " + std::to_string(userIt->second.Balance_RUB) + " RUB";
-    }
-}
-
-void Core::GetUserBalanceValues(const std::string& aUserId, int64_t& OutUSD, int64_t& OutRUB)
-{
-    const auto userIt = mUsers.find(std::stoi(aUserId));
-    if (userIt == mUsers.cend()) return;
-    OutUSD = userIt->second.Balance_USD;
-    OutRUB = userIt->second.Balance_RUB;
-}
-
-void Core::UpdateUserBalance(const std::string& aUserId, const int64_t& InUSD, const int64_t& InRUB)
-{
-    const auto& userIt = mUsers.find(std::stoi(aUserId));
-    if (userIt == mUsers.cend()) return;
-
-    userIt->second.Balance_USD = InUSD;
-    userIt->second.Balance_RUB = InRUB;
-}
-
-void Core::AddNewOrder(const std::string& InUserID, const OrderType& InOrderType, const int64_t& InUSD, const int64_t InRUB)
-{
-    const auto& userIt = mUsers.find(std::stoi(InUserID));
-    if (userIt == mUsers.cend()) return;
-
-    OrderInfo NewOrder;
-    NewOrder.Type = InOrderType;
-    NewOrder.UserID = InUserID;
-    NewOrder.Val_USD = InUSD;
-    NewOrder.Val_RUB = InRUB;
-    NewOrder.Timestamp = boost::posix_time::second_clock::local_time();
-    Orders.insert(std::make_pair(LastOrderIdx, NewOrder));
-    userIt->second.OrderList.push_back(LastOrderIdx);
-    LastOrderIdx += 1;
-}
-
-void Core::RemoveOrder(const std::string& InUserID, const uint64_t OrderID)
-{
-    const auto& userIt = mUsers.find(std::stoi(InUserID));
-    if (userIt == mUsers.cend()) return;
-
-    userIt->second.OrderList.remove(OrderID);
-    Orders.erase(OrderID);
-}
-
-void Core::UpdateOrderPrice(const uint64_t OrderID, const int64_t& InUSD)
-{
-    Orders[OrderID].Val_USD = InUSD;
-    if (Orders[OrderID].Val_USD <= 0)
-    {
-        auto UserID = Orders[OrderID].UserID;
-        RemoveOrder(UserID, OrderID);
-    }
-}
-
-std::vector<uint64_t> Core::GetUserOrdersIDList(const std::string& InUserID) const
-{
-    std::vector<uint64_t> Result;
-    const auto userIt = mUsers.find(std::stoi(InUserID));
-    if (userIt == mUsers.cend())
-    {
-        return Result;
-    }
-    for (auto OrderID : userIt->second.OrderList)
-    {
-        Result.push_back(OrderID);
-    }
-    return Result;
-}
-std::vector<OrderInfo> Core::GetUserOrderList(const std::string& InUserID) const
-{
-    std::vector<OrderInfo> Result;
-    const auto userIt = mUsers.find(std::stoi(InUserID));
-    if (userIt == mUsers.cend())
-    {
-        return Result;
-    }
-    for (auto OrderID : userIt->second.OrderList)
-    {
-        Result.push_back(Orders.at(OrderID));
-    }
-    return Result;
-}
-
-void session::start()
-{
-    socket_.async_read_some(boost::asio::buffer(data_, max_length),
-        boost::bind(&session::handle_read, this,
+    Socket.async_read_some(boost::asio::buffer(DataBuffer, MaxBufferLength),
+        boost::bind(&ClientSession::handle_read, this,
             boost::asio::placeholders::error,
             boost::asio::placeholders::bytes_transferred));
+
+	PingTimeoutHandle = new boost::asio::deadline_timer(io_service, boost::posix_time::milliseconds(ConnectionTimeoutDelay));
+	PingTimeoutHandle->async_wait(boost::bind(&ClientSession::handle_connection_timeout, this, boost::asio::placeholders::error));
 }
 
-void session::handle_read(const boost::system::error_code& error,
+#define MAKE_SIMPLE_CALLBACK_REQUEST(Server, ExecuteName, Message) \
+{ \
+	(Server)->Request(this, Message, \
+		boost::bind(&server::Execute_##ExecuteName, Server, this, Message), \
+		boost::bind(&ClientSession::Callback, this, ""));\
+}\
+
+#define MAKE_LABMDA_CALLBACK_REQUEST(Server, ExecuteName, Message, Lambda) \
+{ \
+	(Server)->Request(this, Message, \
+		boost::bind(&server::Execute_##ExecuteName, Server, this, Message), \
+		Lambda);\
+}\
+
+void ClientSession::handle_read(const boost::system::error_code& error,
     size_t bytes_transferred)
 {
     if (!error)
     {
-        /*Parse json*/
-        data_[bytes_transferred] = '\0';
+	    /*Parse json*/
+    	DataBuffer[bytes_transferred] = '\0';
+    	
+    	auto j = nlohmann::json::parse(DataBuffer);
+    	auto reqType = j["ReqType"];
+    	
+    	std::string reply_body = "Error! Unknown request type";
+    	if(reqType == Requests::Ping)
+    	{
+    		PingTimeoutHandle->cancel();
+    		delete PingTimeoutHandle;
+    		PingTimeoutHandle = new boost::asio::deadline_timer(io_service, boost::posix_time::milliseconds(ConnectionTimeoutDelay));
+    		PingTimeoutHandle->async_wait(boost::bind(&ClientSession::handle_connection_timeout, this, boost::asio::placeholders::error));
 
-        auto j = nlohmann::json::parse(data_);
-        auto reqType = j["ReqType"];
-
-        Reply NewReply;
-        NewReply.reply_body = "Error! Unknown request type";
-        if (reqType == Requests::Registration)
-        {
-        	std::string Msg = j["Message"];
-        	std::vector<std::string> CommandList;
-
-        	boost::split(CommandList, Msg, boost::is_any_of(" "));
-        	pqxx::connection connectionObject(connectionString.c_str());
-        	pqxx::work txn{ connectionObject };
-        	
-        	/*if username is empty - allow to create*/
-        	auto Request = "SELECT username FROM users WHERE username = '" + CommandList[0] + "'";
-        	pqxx::result r = txn.exec(Request);
-        	if(r.affected_rows() == 0)
-        	{
-        		r = txn.exec("SELECT MAX(id) FROM users");
-        		uint64_t ID = 0;
-        		if(!r.empty())
-        		{
-        			ID = std::atoi(r[0][0].c_str());
-        		}
-        		Request = std::format("INSERT INTO users (id, username, password) VALUES ({},'{}','{}')", ID, CommandList[0], CommandList[1]);
-        		txn.exec(Request);
-        		txn.commit();
-        		NewReply.reply_body = "OK " + std::to_string(ID);
-        	}
-        	else
-        	{
-        		NewReply.reply_body = "Error: name is already created";
-        	}
-        }
+    		/*Reset timer*/
+    		std::cout << "Connection is OK" << std::endl;
+    		reply_body = "OK";
+    	}
+    	else if(reqType == Requests::AuthCheck)
+    	{
+    		reply_body = bAuthorized ? "YES" : "NO";
+    	}
+    	else if (reqType == Requests::Registration)
+    	{
+    		MAKE_LABMDA_CALLBACK_REQUEST(OuterServer, Registration, j["Message"], [&](std::string Result)
+			{
+    			std::vector<std::string> CommandList;
+				boost::split(CommandList, Result, boost::is_any_of(" "));
+    			if(CommandList.size() == 2 && CommandList[0] == "OK")
+    			{
+    				my_id = std::atoi(CommandList[1].c_str());
+    				Callback("OK");
+    			}
+    			else
+    			{
+    				Callback(Result);
+    			}
+			})
+    		return;
+    	}
     	else if(reqType == Requests::Authorization)
     	{
-    		std::string Msg = j["Message"];
-    		std::vector<std::string> CommandList;
-    		boost::split(CommandList, Msg, boost::is_any_of(" "));
-        	
-        	pqxx::connection connectionObject(connectionString.c_str());
-    		pqxx::work txn{connectionObject};
-
-    		/*if username is empty - allow to create*/
-    		auto Request = "SELECT id FROM users WHERE username = '" + CommandList[0] + "'" " AND password = '" + CommandList[1] + "'";
-    		pqxx::result r = txn.exec(Request);
-    		if(r.affected_rows() != 0)
-    		{
-    			const uint64_t ID = std::atoi(r[0][0].c_str());
-    			NewReply.reply_body = "OK " + std::to_string(ID);
-    		}
-    		else
-    		{
-    			NewReply.reply_body = "Error: wrong username or pass";
-    		}
+    		MAKE_LABMDA_CALLBACK_REQUEST(OuterServer, Authorization, j["Message"], [&](std::string Result)
+			{
+				std::vector<std::string> CommandList;
+				boost::split(CommandList, Result, boost::is_any_of(" "));
+				if(CommandList.size() == 2 && CommandList[0] == "OK")
+				{
+					my_id = std::atoi(CommandList[1].c_str());
+					Callback("OK");
+				}
+				else
+				{
+					Callback(Result);
+				}
+			})
+    		return;
     	}
-        else if (reqType == Requests::OrderRemove)
-        {
-            NewReply.user = GetCore().GetUsername(j["UserId"]);
-            NewReply.reply_body = "Order not found \n";
-
-            std::string Msg = j["Message"];
-            int64_t OrderIdx = std::atoi(Msg.c_str());
-            const auto OrderList = GetCore().GetUserOrdersIDList(j["UserId"]);
-            if (OrderIdx >= 0 && OrderList.size() > OrderIdx)
-            {
-                GetCore().RemoveOrder(j["UserId"], OrderList[OrderIdx]);
-                NewReply.reply_body = "Order was removed successfully \n";
-            }
-        }
-        else if (reqType == Requests::OrderAdd)
-        {
-            std::string Msg = j["Message"];
-            std::vector<std::string> CommandList;
-            boost::split(CommandList, Msg, boost::is_any_of(" "));
-
-            if (CommandList.size() < 3 || CommandList[0] != "BUY" && CommandList[0] != "SELL")
-            {
-                NewReply.reply_body = "Error: mismatching template";
-            }
-            else
-            {
-                const int64_t Amount_USD = std::atoi(CommandList[1].c_str());
-                const int64_t Amount_RUB = std::atoi(CommandList[2].c_str());
-
-                GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? OrderType::BUY : OrderType::SELL, Amount_USD, Amount_RUB);
-                NewReply.user = GetCore().GetUsername(j["UserId"]);
-                NewReply.reply_body = "Order successfully added";
-
-                OnOrderAdded(j["UserId"]);
-            }
-        }
-        else if (reqType == Requests::Balance)
-        {
-            NewReply.user = GetCore().GetUsername(j["UserId"]);
-            NewReply.reply_body = "Balance is: " + GetCore().GetUserBalance(j["UserId"]);
-        }
-        else if (reqType == Requests::OrderList)
-        {
-            NewReply.user = GetCore().GetUsername(j["UserId"]);
-            NewReply.reply_body = "OrderList:\n";
-
-            const auto OrderList = GetCore().GetUserOrderList(j["UserId"]);
-            for (uint64_t OrderIt = 0; OrderIt < OrderList.size(); OrderIt++)
-            {
-                NewReply.reply_body += std::to_string(OrderIt) + " ";
-
-                const OrderInfo& Order = OrderList[OrderIt];
-                NewReply.reply_body += Order.Type == OrderType::BUY ? "BUY " : "SELL ";
-                NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
-                NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
-                NewReply.reply_body += to_simple_string(Order.Timestamp);
-                NewReply.reply_body += "\n";
-            }
-        }
-
-        replies_queue.push(NewReply);
-        if (replies_queue.size() == 1)
-        {
-            boost::asio::async_write(socket_,
-                boost::asio::buffer(replies_queue.back().reply_body, replies_queue.back().reply_body.size()),
-                boost::bind(&session::handle_write, this,
-                    boost::asio::placeholders::error));
-        }
+    	else if (reqType == Requests::OrderRemove)
+    	{
+    		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, RemoveOrder, j["Message"]);
+			return;
+    	}
+    	else if (reqType == Requests::OrderAdd)
+    	{
+    		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, AddOrder, j["Message"]);
+			return;
+    	}
+    	else if (reqType == Requests::Balance)
+    	{
+    		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, Balance, j["Message"]);
+    		return;
+    	}
+    	else if (reqType == Requests::OrderList)
+    	{
+    		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, OrderList, j["Message"]);
+    		return;
+    	}
+    	Callback(reply_body);
     }
     else
     {
         delete this;
     }
 }
-
-void session::handle_write(const boost::system::error_code& error)
+void ClientSession::Callback(std::string Result)
+{
+	boost::asio::async_write(Socket,
+				boost::asio::buffer(Result, Result.size()),
+				boost::bind(&ClientSession::handle_write, this,
+					boost::asio::placeholders::error));
+}
+void ClientSession::handle_write(const boost::system::error_code& error)
 {
     if (!error)
     {
-        replies_queue.pop();
-        if (replies_queue.size() > 0)
-        {
-            boost::asio::async_write(socket_,
-                boost::asio::buffer(replies_queue.back().reply_body, replies_queue.back().reply_body.size()),
-                boost::bind(&session::handle_write, this,
-                    boost::asio::placeholders::error));
-        }
-        socket_.async_read_some(boost::asio::buffer(data_, max_length),
-            boost::bind(&session::handle_read, this,
+        Socket.async_read_some(boost::asio::buffer(DataBuffer, MaxBufferLength),
+            boost::bind(&ClientSession::handle_read, this,
                 boost::asio::placeholders::error,
                 boost::asio::placeholders::bytes_transferred));
     }
@@ -288,10 +144,15 @@ void session::handle_write(const boost::system::error_code& error)
         delete this;
     }
 }
-
-void session::OnOrderAdded(const std::string UserID)
+void ClientSession::handle_connection_timeout(const boost::system::error_code& error)
 {
-    auto AddedOrderIdx = GetCore().GetUserOrdersIDList(UserID).back();
+	if(error.failed()) return;
+	std::cout << "Connection is lost" << std::endl;
+}
+
+void ClientSession::OnOrderAdded(const std::string UserID)
+{
+    /*auto AddedOrderIdx = GetCore().GetUserOrdersIDList(UserID).back();
     auto& OrderList = GetCore().GetOrderList();
     auto& AddedOrderData = GetCore().GetOrderList().at(AddedOrderIdx);
 
@@ -310,20 +171,16 @@ void session::OnOrderAdded(const std::string UserID)
         Buffer.push_back(OrderInfoHolder(Order.first, Order.second));
     }
 
-    /*Sort orders by price (lower-> upper for buy, opposite for sell)*/
     std::sort(Buffer.begin(), Buffer.end(), [&](const OrderInfoHolder& Lhs, const OrderInfoHolder& Rhs)->bool
-        {
-            /*Take latest order*/
-            if (Lhs.Info.Val_RUB == Rhs.Info.Val_RUB) return Lhs.Info.Timestamp < Rhs.Info.Timestamp;
-
-    return AddedOrderData.Type == OrderType::BUY ?
-        Lhs.Info.Val_RUB < Rhs.Info.Val_RUB :
-        Lhs.Info.Val_RUB > Rhs.Info.Val_RUB;
+    {
+		if (Lhs.Info.Val_RUB == Rhs.Info.Val_RUB) return Lhs.Info.Timestamp < Rhs.Info.Timestamp;
+		return AddedOrderData.Type == OrderType::BUY ?
+		        Lhs.Info.Val_RUB < Rhs.Info.Val_RUB :
+		        Lhs.Info.Val_RUB > Rhs.Info.Val_RUB;
         });
 
     for (auto& OrderToCompare : Buffer)
     {
-        /*take min value, both orders should decrease their order to this*/
         auto DeltaValue = std::min(AddedOrderData.Val_USD, OrderToCompare.Info.Val_USD);
 
         auto FirstUserID = AddedOrderData.UserID;
@@ -331,7 +188,6 @@ void session::OnOrderAdded(const std::string UserID)
         GetCore().UpdateOrderPrice(AddedOrderIdx, AddedOrderData.Val_USD - DeltaValue);
         GetCore().UpdateOrderPrice(OrderToCompare.OrderID, OrderToCompare.Info.Val_USD - DeltaValue);
 
-        /*Update balances*/
         int64_t FirstUser_USD, FirstUser_RUB;
         int64_t SecondUser_USD, SecondUser_RUB;
         GetCore().GetUserBalanceValues(FirstUserID, FirstUser_USD, FirstUser_RUB);
@@ -355,9 +211,8 @@ void session::OnOrderAdded(const std::string UserID)
             GetCore().UpdateUserBalance(SecondUserID, SecondUser_USD - DeltaValue, SecondUser_RUB + DeltaValue * AddedOrderData.Val_RUB);
         }
 
-        /*if new order still active - continue*/
         if (AddedOrderData.Val_USD == 0) return;
-    }
+    }*/
 }
 
 server::server(boost::asio::io_service& io_service)
@@ -365,22 +220,20 @@ server::server(boost::asio::io_service& io_service)
     acceptor_(io_service, tcp::endpoint(tcp::v4(), port))
 {
     std::cout << "Server started! Listen " << port << " port" << std::endl;
-
-    session* new_session = new session(io_service_);
-    acceptor_.async_accept(new_session->socket(),
+    ClientSession* new_session = new ClientSession(this, io_service_);
+    acceptor_.async_accept(new_session->GetSocket(),
         boost::bind(&server::handle_accept, this, new_session,
             boost::asio::placeholders::error));
 }
-
-void server::handle_accept(session* new_session, const boost::system::error_code& error)
+void server::handle_accept(ClientSession* new_session, const boost::system::error_code& error)
 {
     if (!error)
     {
-        new_session->start();
+        new_session->Start();
 
         /*do ping every N seconds*/
-        new_session = new session(io_service_);
-        acceptor_.async_accept(new_session->socket(),
+        new_session = new ClientSession(this, io_service_);
+        acceptor_.async_accept(new_session->GetSocket(),
             boost::bind(&server::handle_accept, this, new_session,
                 boost::asio::placeholders::error));
     }
@@ -388,4 +241,129 @@ void server::handle_accept(session* new_session, const boost::system::error_code
     {
         delete new_session;
     }
+}
+
+void server::handle_end_connection(ClientSession *InSession)
+{
+}
+
+void server::Request(ClientSession* InSession, std::string Msg, ExecuteSignature InExecuteMethod,
+	CallbackSignature SessionCallback)
+{
+	RequestQueue.push(QueuedRequest(InSession, InExecuteMethod, SessionCallback));
+	if(RequestQueue.front().Session)
+	{
+		RequestQueue.front().ExecuteMethod(InSession, Msg);
+	}
+	RequestQueue.pop();
+}
+
+void server::Execute_AddOrder(ClientSession* InSession, std::string Msg)
+{
+	std::string reply_body = "Order not found \n";
+	int64_t OrderIdx = std::atoi(Msg.c_str());
+
+	/*std::string Msg = j["Message"];
+			std::vector<std::string> CommandList;
+			boost::split(CommandList, Msg, boost::is_any_of(" "));
+
+			if (CommandList.size() < 3 || CommandList[0] != "BUY" && CommandList[0] != "SELL")
+			{
+				NewReply.reply_body = "Error: mismatching template";
+			}
+			else
+			{
+				const int64_t Amount_USD = std::atoi(CommandList[1].c_str());
+				const int64_t Amount_RUB = std::atoi(CommandList[2].c_str());
+
+				GetCore().AddNewOrder(j["UserId"], CommandList[0] == "BUY" ? OrderType::BUY : OrderType::SELL, Amount_USD, Amount_RUB);
+				NewReply.user = GetCore().GetUsername(j["UserId"]);
+				NewReply.reply_body = "Order successfully added";
+
+				OnOrderAdded(j["UserId"]);
+			}*/
+}
+
+void server::Execute_RemoveOrder(ClientSession* InSession, std::string Msg)
+{
+	/*const auto OrderList = GetCore().GetUserOrdersIDList(j["UserId"]);
+	if (OrderIdx >= 0 && OrderList.size() > OrderIdx)
+	{
+		GetCore().RemoveOrder(j["UserId"], OrderList[OrderIdx]);
+		NewReply.reply_body = "Order was removed successfully \n";
+	}*/
+}
+
+void server::Execute_Registration(ClientSession* InSession, std::string Msg)
+{
+	std::string reply_body = "Unknown error \n";
+
+	/*Parse commands */
+	std::vector<std::string> CommandList;
+	boost::split(CommandList, Msg, boost::is_any_of(" "));
+        	
+	/*if username is empty - allow to create*/
+	pqxx::result r = SQL_Request("SELECT username FROM users WHERE username = '%s'", CommandList[0]);
+	if(r.affected_rows() == 0)
+	{
+		r = SQL_Request("SELECT MAX(id) FROM users");
+		uint64_t ID = 0;
+		if(!r.empty())
+		{
+			ID = std::atoi(r[0][0].c_str());
+		}
+		SQL_Request("INSERT INTO users (id, username, password) VALUES ({},'{}','{}')", ID, CommandList[0], CommandList[1]);
+		Transaction->commit();
+		reply_body = "OK " + std::to_string(ID);
+	}
+	else
+	{
+		reply_body = "Error: name is already created";
+	}
+	//RequestQueue.front().SessionCallback(reply_body);
+}
+
+void server::Execute_Authorization(ClientSession *InSession, std::string Msg)
+{
+	std::vector<std::string> CommandList;
+	boost::split(CommandList, Msg, boost::is_any_of(" "));
+	std::string reply_body = "Unknown error \n";
+
+	/*if username is empty - allow to create*/
+	pqxx::result r = SQL_Request("SELECT id FROM users WHERE username = '%s' AND password = '%s'", CommandList[0].c_str(), CommandList[1].c_str());
+	if(r.affected_rows() != 0)
+	{
+		const uint64_t ID = std::atoi(r[0][0].c_str());
+		reply_body = "OK " + std::to_string(ID);
+	}
+	else
+	{
+		reply_body = "Error: wrong username or pass";
+	}
+	//RequestQueue.front().SessionCallback(reply_body);
+}
+
+void server::Execute_Balance(ClientSession *InSession, std::string Msg)
+{
+	/*NewReply.user = GetCore().GetUsername(j["UserId"]);
+			NewReply.reply_body = "Balance is: " + GetCore().GetUserBalance(j["UserId"]);*/
+}
+
+void server::Execute_OrderList(ClientSession *InSession, std::string Msg)
+{
+	/*NewReply.user = GetCore().GetUsername(j["UserId"]);
+			 NewReply.reply_body = "OrderList:\n";
+ 
+			 const auto OrderList = GetCore().GetUserOrderList(j["UserId"]);
+			 for (uint64_t OrderIt = 0; OrderIt < OrderList.size(); OrderIt++)
+			 {
+				 NewReply.reply_body += std::to_string(OrderIt) + " ";
+ 
+				 const OrderInfo& Order = OrderList[OrderIt];
+				 NewReply.reply_body += Order.Type == OrderType::BUY ? "BUY " : "SELL ";
+				 NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
+				 NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
+				 NewReply.reply_body += to_simple_string(Order.Timestamp);
+				 NewReply.reply_body += "\n";
+			 }*/
 }

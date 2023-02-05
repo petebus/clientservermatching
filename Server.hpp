@@ -1,112 +1,106 @@
-#include <cstdlib>
-#include <iostream>
+#pragma once
 #include <queue>
-#include <boost/bind/bind.hpp>
-#include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
+#include <pqxx/connection.hxx>
+#include <pqxx/transaction.hxx>
 #include "json.hpp"
-#include "Common.hpp"
-#include <boost/date_time/posix_time/posix_time.hpp>
+#include<boost/function.hpp>
 
 using boost::asio::ip::tcp;
 
-enum class OrderType
+class ClientSession
 {
-    BUY,
-    SELL
-};
-
-struct OrderInfo
-{
-    OrderInfo() : UserID(""), Type(OrderType::BUY), Val_USD(0), Val_RUB(0) { }
-    std::string UserID;
-    OrderType Type;
-    int64_t Val_USD;
-    int64_t Val_RUB;
-    boost::posix_time::ptime Timestamp;
-};
-
-struct UserData
-{
-    UserData() : UserName(""), Balance_USD(0), Balance_RUB(0)
-    {
-
-    }
-    UserData(const std::string& InUserName) : UserName(InUserName), Balance_USD(0), Balance_RUB(0)
-    {
-
-    }
-    std::string UserName;
-    int64_t Balance_USD;
-    int64_t Balance_RUB;
-    std::list<uint64_t> OrderList;
-};
-
-class Core
-{
+	static constexpr size_t MaxBufferLength = 1024;
 public:
-    std::string RegisterNewUser(const std::string& aUserName);
+    ClientSession(class server* InServer, boost::asio::io_service& InIoService)
+        : OuterServer(InServer), io_service(InIoService), Socket(InIoService)
+    {
+    }
 
-    std::string GetUsername(const std::string& aUserId);
-    std::string GetUserBalance(const std::string& aUserId);
-    void GetUserBalanceValues(const std::string& aUserId, int64_t& OutUSD, int64_t& OutRUB);
-    void UpdateUserBalance(const std::string& aUserId, const int64_t& InUSD, const int64_t& InRUB);
-    void AddNewOrder(const std::string& InUserID, const OrderType& InOrderType, const int64_t& InUSD, const int64_t InRUB);
-    void RemoveOrder(const std::string& InUserID, const uint64_t OrderID);
-    void UpdateOrderPrice(const uint64_t OrderID, const int64_t& InUSD);
+    tcp::socket& GetSocket()
+    {
+        return Socket;
+    }
 
-    const std::unordered_map<uint64_t, OrderInfo>& GetOrderList() const { return Orders; }
-
-    std::vector<uint64_t> GetUserOrdersIDList(const std::string& InUserID) const;
-    std::vector<OrderInfo> GetUserOrderList(const std::string& InUserID) const;
+    void Start();
+	bool IsAuthorized() const { return bAuthorized; }
 
 private:
-    // <UserId, UserName>
-    std::map<size_t, UserData> mUsers;
-    std::unordered_map<uint64_t, OrderInfo> Orders;
-    uint64_t LastOrderIdx = 0;
-};
-
-Core& GetCore();
-
-class session
-{
-public:
-    session(boost::asio::io_service& io_service)
-        : socket_(io_service)
-    {
-    }
-
-    tcp::socket& socket()
-    {
-        return socket_;
-    }
-
-    void start();
     void handle_read(const boost::system::error_code& error, size_t bytes_transferred);
     void handle_write(const boost::system::error_code& error);
     void OnOrderAdded(const std::string UserID);
 
-private:
-    tcp::socket socket_;
-    enum { max_length = 1024 };
-    char data_[max_length];
-    struct Reply
-    {
-        std::string user;
-        std::string reply_body;
-    };
-    std::queue<Reply> replies_queue;
+	void Callback(std::string Result);
+	
+	/*Authorization*/
+	std::string my_id;
+	bool bAuthorized = false;
+
+	/*Connection data*/
+	class server* OuterServer;
+	boost::asio::io_service& io_service;
+	tcp::socket Socket;
+
+	/*Ping connection timeout handle*/
+	void handle_connection_timeout(const boost::system::error_code& error);
+	boost::asio::deadline_timer* PingTimeoutHandle = nullptr;
+	
+	/*Buffer for reading*/
+    char DataBuffer[MaxBufferLength];
+	
 };
+
+typedef boost::function<void (ClientSession*, std::string)> ExecuteSignature;
+typedef boost::function<void (std::string)> CallbackSignature;
 
 class server
 {
 public:
     server(boost::asio::io_service& io_service);
 
-    void handle_accept(session* new_session, const boost::system::error_code& error);
+	void handle_accept(ClientSession* new_session, const boost::system::error_code& error);
+	void handle_end_connection(ClientSession* InSession);
+	
+	void Request(ClientSession* InSession, std::string Msg, ExecuteSignature InExecuteMethod,
+		CallbackSignature SessionCallback);
+	
+	void Execute_AddOrder(ClientSession* InSession, std::string Msg);
+	void Execute_RemoveOrder(ClientSession* InSession, std::string Msg);
+	void Execute_Registration(ClientSession* InSession, std::string Msg);
+	void Execute_Authorization(ClientSession* InSession, std::string Msg);
+	void Execute_Balance(ClientSession* InSession, std::string Msg);
+	void Execute_OrderList(ClientSession* InSession, std::string Msg);
 
 private:
+	
+	/*PostgreDB connection*/
+	template <typename... Args>
+	constexpr pqxx::result SQL_Request(const char* InFormat, Args... InArgs)
+	{
+		char buffer[1024];
+		sprintf_s(buffer, InFormat, InArgs...);
+
+		const std::string FullRequest = buffer;
+		pqxx::result Result = Transaction->exec(FullRequest);
+		return Result;
+	}
+	pqxx::connection* ConnectionObject;
+	pqxx::work* Transaction;
+	
     boost::asio::io_service& io_service_;
     tcp::acceptor acceptor_;
+
+   struct QueuedRequest
+    {
+	    QueuedRequest() = delete;
+    	QueuedRequest(ClientSession* InSession, ExecuteSignature InExecuteMethod, CallbackSignature InSessionCallback) :
+    		Session(InSession),
+    		ExecuteMethod(InExecuteMethod),
+    		SessionCallback(InSessionCallback) {}
+
+    	ClientSession* Session;
+    	ExecuteSignature ExecuteMethod;
+		CallbackSignature SessionCallback;
+    };
+	std::queue<QueuedRequest> RequestQueue;
 };

@@ -8,23 +8,27 @@ using namespace std;
 
 class Client {
     unique_ptr<tcp::socket> s;
-    std::string my_id;
 
     boost::asio::io_service io_service;
     tcp::resolver* resolver;
     tcp::resolver::query* query;
     tcp::resolver::iterator* iterator;
 
-	bool bAuthorized = false;
-	
 public:
-    Client() : s(nullptr), my_id(""), resolver(nullptr), query(nullptr), iterator(nullptr) {}
+    Client() : s(nullptr), resolver(nullptr), query(nullptr), iterator(nullptr)  {}
     virtual ~Client() {}
-
-	const bool IsAuthorized() const { return bAuthorized; }
-    void Send(const std::string& aRequestType, const std::string& aMessage);
-    string ReadMessage();
+	void Connect();
+	
+	/*Login methods*/
 	string Authorize(const std::string& Username, const std::string& Password);
-    string ProcessRegistration(const std::string& InUsername, const std::string& InPassword);
-    void Connect();
+    string Register(const std::string& InUsername, const std::string& InPassword);
+	bool IsAuthorized();
+
+private:
+	void Send(const std::string& aRequestType, const std::string& aMessage);
+	string ReadMessage();
+
+	/*Ping*/
+	boost::asio::deadline_timer* PingTimer = nullptr;
+	void SendPing();
 };
