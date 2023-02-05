@@ -1,7 +1,6 @@
 #include <iostream>
-
 #include "Client.hpp"
-
+#include <boost/algorithm/string.hpp>
 int main()
 {
 	Client cl;
@@ -9,37 +8,70 @@ int main()
 	try
 	{
 		cl.Connect();
+		/*Authorization menu*/
+		while(!cl.IsAuthorized())
+		{
+			std::cout << "Hello:\n"
+				"1) Authorize\n"
+				"2) Register\n"
+				<< std::endl;
+			short menu_option_num;
+			std::cin >> menu_option_num;
+			switch (menu_option_num)
+			{
+				case 1:
+				{
+					std::cout << "Login with format: USERNAME PASSWORD" << std::endl;
+					std::string command;
+					std::cin.ignore();
+					std::getline(std::cin, command);
 
-		/*SendMessage(s, "0", Requests::Registration, "1");
-		std::string FirstClient = ReadMessage(s);
-		SendMessage(s, "0", Requests::Registration, "2");
-		std::string SecondClient = ReadMessage(s);
-		SendMessage(s, "0", Requests::Registration, "3");
-		std::string ThirdClient = ReadMessage(s);
+					std::vector<std::string> CommandList;
+					boost::split(CommandList, command, boost::is_any_of(" "));
 
-		SendMessage(s, FirstClient, Requests::OrderAdd, "BUY 10 62");
-		ReadMessage(s);
-		SendMessage(s, SecondClient, Requests::OrderAdd, "BUY 20 63");
-		ReadMessage(s);
-		SendMessage(s, ThirdClient, Requests::OrderAdd, "SELL 50 61");
-		ReadMessage(s);
+					if (CommandList.size() != 2)
+					{
+						std::cout << "Error: mismatching template" << endl;
+						break;
+					}
+					std::string Result = cl.Authorize(CommandList[0], CommandList[1]);
+					if(!cl.IsAuthorized())
+					{
+						std::cout << Result << endl;
+					}
+					break;
+				}
+				case 2:
+				{
+					std::cout << "Register with format: USERNAME PASSWORD" << std::endl;
+					std::string command;
+					std::cin.ignore();
+					std::getline(std::cin, command);
 
-		SendMessage(s, FirstClient, Requests::OrderList, "");
-		std::cout << ReadMessage(s) << std::endl;
-		SendMessage(s, SecondClient, Requests::OrderList, "");
-		std::cout << ReadMessage(s) << std::endl;
-		SendMessage(s, ThirdClient, Requests::OrderList, "");
-		std::cout << ReadMessage(s) << std::endl;
+					std::vector<std::string> CommandList;
+					boost::split(CommandList, command, boost::is_any_of(" "));
 
-		SendMessage(s, FirstClient, Requests::Balance, "");
-		std::cout << ReadMessage(s) << std::endl;
-		SendMessage(s, SecondClient, Requests::Balance, "");
-		std::cout << ReadMessage(s) << std::endl;
-		SendMessage(s, ThirdClient, Requests::Balance, "");
-		std::cout << ReadMessage(s) << std::endl;
-		return 0;*/
-
-		cl.ProcessRegistration();
+					if (CommandList.size() != 2)
+					{
+						std::cout << "Error: mismatching template" << endl;
+						break;
+					}
+					
+					std::string Result = cl.ProcessRegistration(CommandList[0], CommandList[1]);
+					if(!cl.IsAuthorized())
+					{
+						std::cout << Result << endl;
+					}
+					break;
+				}
+				default:
+				{
+					std::cout << "Unknown menu option\n" << std::endl;
+					std::cin.clear();
+					std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+				}
+			}
+		}
 		while (true)
 		{
 			// Тут реализовано "бесконечное" меню.

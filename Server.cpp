@@ -1,5 +1,8 @@
 #include "Server.hpp"
 
+#include <pqxx/connection.hxx>
+#include <pqxx/transaction.hxx>
+
 std::string Core::RegisterNewUser(const std::string& aUserName)
 {
     size_t newUserId = mUsers.size();
@@ -138,8 +141,56 @@ void session::handle_read(const boost::system::error_code& error,
         NewReply.reply_body = "Error! Unknown request type";
         if (reqType == Requests::Registration)
         {
-            NewReply.reply_body = GetCore().RegisterNewUser(j["Message"]);
+        	std::string Msg = j["Message"];
+        	std::vector<std::string> CommandList;
+
+        	boost::split(CommandList, Msg, boost::is_any_of(" "));
+        	pqxx::connection connectionObject(connectionString.c_str());
+        	pqxx::work txn{ connectionObject };
+        	
+        	/*if username is empty - allow to create*/
+        	auto Request = "SELECT username FROM users WHERE username = '" + CommandList[0] + "'";
+        	pqxx::result r = txn.exec(Request);
+        	if(r.affected_rows() == 0)
+        	{
+        		r = txn.exec("SELECT MAX(id) FROM users");
+        		uint64_t ID = 0;
+        		if(!r.empty())
+        		{
+        			ID = std::atoi(r[0][0].c_str());
+        		}
+        		Request = std::format("INSERT INTO users (id, username, password) VALUES ({},'{}','{}')", ID, CommandList[0], CommandList[1]);
+        		txn.exec(Request);
+        		txn.commit();
+        		NewReply.reply_body = "OK " + std::to_string(ID);
+        	}
+        	else
+        	{
+        		NewReply.reply_body = "Error: name is already created";
+        	}
         }
+    	else if(reqType == Requests::Authorization)
+    	{
+    		std::string Msg = j["Message"];
+    		std::vector<std::string> CommandList;
+    		boost::split(CommandList, Msg, boost::is_any_of(" "));
+        	
+        	pqxx::connection connectionObject(connectionString.c_str());
+    		pqxx::work txn{connectionObject};
+
+    		/*if username is empty - allow to create*/
+    		auto Request = "SELECT id FROM users WHERE username = '" + CommandList[0] + "'" " AND password = '" + CommandList[1] + "'";
+    		pqxx::result r = txn.exec(Request);
+    		if(r.affected_rows() != 0)
+    		{
+    			const uint64_t ID = std::atoi(r[0][0].c_str());
+    			NewReply.reply_body = "OK " + std::to_string(ID);
+    		}
+    		else
+    		{
+    			NewReply.reply_body = "Error: wrong username or pass";
+    		}
+    	}
         else if (reqType == Requests::OrderRemove)
         {
             NewReply.user = GetCore().GetUsername(j["UserId"]);

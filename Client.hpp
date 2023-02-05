@@ -15,13 +15,16 @@ class Client {
     tcp::resolver::query* query;
     tcp::resolver::iterator* iterator;
 
+	bool bAuthorized = false;
+	
 public:
-    Client() : s(nullptr), my_id(""), resolver(nullptr), query(nullptr), iterator(nullptr) {
-    };
-    virtual ~Client() {};
+    Client() : s(nullptr), my_id(""), resolver(nullptr), query(nullptr), iterator(nullptr) {}
+    virtual ~Client() {}
 
+	const bool IsAuthorized() const { return bAuthorized; }
     void Send(const std::string& aRequestType, const std::string& aMessage);
     string ReadMessage();
-    void ProcessRegistration();
+	string Authorize(const std::string& Username, const std::string& Password);
+    string ProcessRegistration(const std::string& InUsername, const std::string& InPassword);
     void Connect();
 };

@@ -2,6 +2,7 @@
 
 #include "Client.hpp"
 #include "json.hpp"
+#include "boost/algorithm/string.hpp"
 
 // Отправка сообщения на сервер по шаблону.
 void Client::Send(
@@ -27,16 +28,36 @@ std::string Client::ReadMessage()
     return line;
 }
 
-// "Создаём" пользователя, получаем его ID.
-void Client::ProcessRegistration()
+std::string Client::Authorize(const std::string& Username, const std::string& Password)
 {
-    std::string name;
-    std::cout << "Hello! Enter your name: ";
-    std::cin >> name;
+	Send(Requests::Authorization, Username + " " + Password);
+	std::string Result = ReadMessage();
 
-    // Для регистрации Id не нужен, заполним его нулём
-    Send(Requests::Registration, name);
-    my_id = ReadMessage();
+	std::vector<std::string> CommandList;
+	boost::split(CommandList, Result, boost::is_any_of(" "));
+	if(CommandList.size() == 2 && CommandList[0] == "OK")
+	{
+		bAuthorized = true;
+		my_id = CommandList[1];
+		return "Hello!\n";
+	}
+	return Result;
+}
+
+std::string Client::ProcessRegistration(const std::string& InUsername, const std::string& InPassword)
+{
+    Send(Requests::Registration, InUsername + " " + InPassword);
+	std::string Result = ReadMessage();
+
+	std::vector<std::string> CommandList;
+	boost::split(CommandList, Result, boost::is_any_of(" "));
+	if(CommandList.size() == 2 && CommandList[0] == "OK")
+	{
+		bAuthorized = true;
+		my_id = CommandList[1];
+		return "Hello!\n";
+	}
+	return Result;
 }
 
 void Client::Connect()
