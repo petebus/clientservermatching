@@ -10,11 +10,11 @@ int main()
 
 	try
 	{
-		std::thread thread1{[&cl]()
+		cl.Connect();
+		while(!cl.IsConnected())
 		{
-			cl.Connect();
-		}};
-		while(!cl.IsConnected()){}
+			std::this_thread::sleep_for(chrono::milliseconds(100));
+		}
 		
 		/*Authorization menu*/
 		while(!cl.IsAuthorized())
@@ -80,7 +80,7 @@ int main()
 				}
 			}
 		}
-
+		
 		/*Main navigation*/
 		while (cl.IsAuthorized())
 		{
@@ -96,56 +96,52 @@ int main()
 			std::cin >> menu_option_num;
 			switch (menu_option_num)
 			{
-			case 1:
-			{
-				std::cout << "Write order data in format: BUY/SELL USD_VAL RUB_VAL " << std::endl;
-				std::string command;
-
-				std::cin.ignore();
-				std::getline(std::cin, command);
-
-				std::cout << cl.AddOrder(command) << std::endl;
-
-				break;
-			}
-			case 2:
-			{
-				/*std::cout << "Which order you want to remove?" << std::endl;
-				int32_t OrderIdx = -1;
-				std::cin >> OrderIdx;
-				if (OrderIdx == -1)
+				case 1:
 				{
-					std::cout << "Wrong input" << std::endl;
+					std::cout << "Write order data in format: BUY/SELL USD_VAL RUB_VAL " << std::endl;
+					std::string command;
+
+					std::cin.ignore();
+					std::getline(std::cin, command);
+
+					std::cout << cl.AddOrder(command) << std::endl;
+
 					break;
 				}
-
-				cl.Send(Requests::OrderRemove, std::to_string(OrderIdx));
-				std::cout << cl.ReadMessage() << std::endl;*/
-
-				break;
-			}
-			case 3:
-			{
-				std::cout << cl.GetBalance() << std::endl;
-				break;
-			}
-			case 4:
-			{
-				/*cl.Send(Requests::OrderList, "");
-				std::cout << cl.ReadMessage() << std::endl;*/
-				break;
-			}
-			case 5:
-			{
-				exit(0);
-				break;
-			}
-			default:
-			{
-				std::cout << "Unknown menu option\n" << std::endl;
-				std::cin.clear();
-				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-			}
+				case 2:
+				{
+					std::cout << "Which order you want to remove?" << std::endl;
+					int32_t OrderIdx = -1;
+					std::cin >> OrderIdx;
+					if (OrderIdx == -1)
+					{
+						std::cout << "Wrong input" << std::endl;
+						break;
+					}
+					std::cout << cl.RemoveOrder(std::to_string(OrderIdx)) << std::endl;
+					break;
+				}
+				case 3:
+				{
+					std::cout << cl.GetBalance() << std::endl;
+					break;
+				}
+				case 4:
+				{
+					std::cout << cl.GetOrderList() << std::endl;
+					break;
+				}
+				case 5:
+				{
+					exit(0);
+					break;
+				}
+				default:
+				{
+					std::cout << "Unknown menu option\n" << std::endl;
+					std::cin.clear();
+					std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+				}
 			}
 		}
 	}

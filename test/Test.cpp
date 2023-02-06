@@ -12,9 +12,9 @@ struct ClientServerFixture
 		: cl(), srv(io_service)
 	{
 		ServerThread = new std::thread([&]()
-		{
-			srv.Start();
-		});
+			{
+				srv.Start();
+			});
 	}
 
 	~ClientServerFixture()
@@ -32,10 +32,7 @@ BOOST_FIXTURE_TEST_SUITE(ClientMethods, ClientServerFixture)
 
 BOOST_AUTO_TEST_CASE(ConnectionTest)
 {	
-	std::jthread ClientThread{[&]()
-	{
-		cl.Connect();
-	}};
+	cl.Connect();
 	std::this_thread::sleep_for(chrono::milliseconds(100));
 	BOOST_CHECK(cl.IsConnected());
 	cl.Disconnect();
@@ -49,6 +46,36 @@ BOOST_FIXTURE_TEST_CASE(Authorization, ClientServerFixture)
 BOOST_FIXTURE_TEST_CASE(AddOrder, ClientServerFixture)
 {
 	
+}
+
+BOOST_FIXTURE_TEST_CASE(TestScenario, ClientServerFixture)
+{
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("1", "1");
+	if(!cl.IsAuthorized()) cl.Register("1", "1");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.AddOrder("BUY 10 62");
+	cl.Disconnect();
+
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("2", "2");
+	if(!cl.IsAuthorized()) cl.Register("2", "2");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.AddOrder("BUY 20 63");
+	cl.Disconnect();
+
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("3", "3");
+	if(!cl.IsAuthorized()) cl.Register("3", "3");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.AddOrder("SELL 50 63");
+	cl.Disconnect();
 }
 
 BOOST_AUTO_TEST_SUITE_END()

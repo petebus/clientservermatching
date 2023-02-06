@@ -5,6 +5,7 @@
 #include <pqxx/transaction.hxx>
 #include "json.hpp"
 #include<boost/function.hpp>
+#include <pqxx/nontransaction.hxx>
 
 using boost::asio::ip::tcp;
 
@@ -29,7 +30,6 @@ public:
 private:
     void handle_read(const boost::system::error_code& error, size_t bytes_transferred);
     void handle_write(const boost::system::error_code& error);
-    void OnOrderAdded(const std::string UserID);
 
 	void Callback(std::string Result);
 	
@@ -50,7 +50,6 @@ private:
     char DataBuffer[MaxBufferLength];
 
 	std::string Output;
-
 	std::mutex Lock;
 };
 
@@ -78,27 +77,26 @@ public:
 	void Execute_Balance(ClientSession* InSession, std::string Msg);
 	void Execute_OrderList(ClientSession* InSession, std::string Msg);
 
-	pqxx::connection* GetConnection() {
-		return ConnectionObject.get();
-	}
-
 private:
+	void Handle_OrderAdded(ClientSession* InSession);
+	void Handle_MakeMatch(const pqxx::row& BuyOrder, const pqxx::row& SellOrder);
 	
 	/*PostgreDB connection*/
 	template <typename... Args>
-	constexpr pqxx::result SQL_Request(const char* InFormat, Args... InArgs)
+	constexpr pqxx::result SQL_Request(bool bCommit, const char* InFormat, Args... InArgs)
 	{
 		char buffer[1024];
 		sprintf_s(buffer, InFormat, InArgs...);
 
 		const std::string FullRequest = buffer;
-		pqxx::result Result = Transaction->exec(FullRequest);
+		pqxx::work Transaction(*ConnectionObject.get());
+		pqxx::result Result = Transaction.exec(FullRequest);
+		if(bCommit) Transaction.commit();
 		return Result;
 	}
 	std::shared_ptr<pqxx::connection> ConnectionObject;
-	std::shared_ptr<pqxx::work> Transaction;
 	
-    boost::asio::io_service& io_service_;
+    boost::asio::io_service& io_service;
     tcp::acceptor acceptor_;
 
     struct QueuedRequest

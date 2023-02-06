@@ -161,94 +161,28 @@ void ClientSession::handle_connection_timeout(const boost::system::error_code& e
 	std::cout << "Connection is lost" << std::endl;
 }
 
-void ClientSession::OnOrderAdded(const std::string UserID)
-{
-    /*auto AddedOrderIdx = GetCore().GetUserOrdersIDList(UserID).back();
-    auto& OrderList = GetCore().GetOrderList();
-    auto& AddedOrderData = GetCore().GetOrderList().at(AddedOrderIdx);
-
-    struct OrderInfoHolder
-    {
-        OrderInfoHolder() : OrderID(0), Info(OrderInfo()) {}
-        OrderInfoHolder(const uint64_t& InOrderID, const OrderInfo& InOrderInfo) : OrderID(InOrderID), Info(InOrderInfo) {}
-        uint64_t OrderID;
-        OrderInfo Info;
-    };
-    std::vector<OrderInfoHolder> Buffer;
-    for (auto& Order : OrderList)
-    {
-        if (Order.first == AddedOrderIdx) continue;
-        if (Order.second.Type == AddedOrderData.Type) continue;
-        Buffer.push_back(OrderInfoHolder(Order.first, Order.second));
-    }
-
-    std::sort(Buffer.begin(), Buffer.end(), [&](const OrderInfoHolder& Lhs, const OrderInfoHolder& Rhs)->bool
-    {
-		if (Lhs.Info.Val_RUB == Rhs.Info.Val_RUB) return Lhs.Info.Timestamp < Rhs.Info.Timestamp;
-		return AddedOrderData.Type == OrderType::BUY ?
-		        Lhs.Info.Val_RUB < Rhs.Info.Val_RUB :
-		        Lhs.Info.Val_RUB > Rhs.Info.Val_RUB;
-        });
-
-    for (auto& OrderToCompare : Buffer)
-    {
-        auto DeltaValue = std::min(AddedOrderData.Val_USD, OrderToCompare.Info.Val_USD);
-
-        auto FirstUserID = AddedOrderData.UserID;
-        auto SecondUserID = OrderToCompare.Info.UserID;
-        GetCore().UpdateOrderPrice(AddedOrderIdx, AddedOrderData.Val_USD - DeltaValue);
-        GetCore().UpdateOrderPrice(OrderToCompare.OrderID, OrderToCompare.Info.Val_USD - DeltaValue);
-
-        int64_t FirstUser_USD, FirstUser_RUB;
-        int64_t SecondUser_USD, SecondUser_RUB;
-        GetCore().GetUserBalanceValues(FirstUserID, FirstUser_USD, FirstUser_RUB);
-        GetCore().GetUserBalanceValues(SecondUserID, SecondUser_USD, SecondUser_RUB);
-
-        if (AddedOrderData.Type == OrderType::BUY)
-        {
-            GetCore().UpdateUserBalance(FirstUserID, FirstUser_USD + DeltaValue, FirstUser_RUB - DeltaValue * AddedOrderData.Val_RUB);
-        }
-        else
-        {
-            GetCore().UpdateUserBalance(FirstUserID, FirstUser_USD - DeltaValue, FirstUser_RUB + DeltaValue * OrderToCompare.Info.Val_RUB);
-        }
-
-        if (OrderToCompare.Info.Type == OrderType::BUY)
-        {
-            GetCore().UpdateUserBalance(SecondUserID, SecondUser_USD + DeltaValue, SecondUser_RUB - DeltaValue * OrderToCompare.Info.Val_RUB);
-        }
-        else
-        {
-            GetCore().UpdateUserBalance(SecondUserID, SecondUser_USD - DeltaValue, SecondUser_RUB + DeltaValue * AddedOrderData.Val_RUB);
-        }
-
-        if (AddedOrderData.Val_USD == 0) return;
-    }*/
-}
-
 server::server(boost::asio::io_service& io_service)
-    : io_service_(io_service),
+    : io_service(io_service),
     acceptor_(io_service, tcp::endpoint(tcp::v4(), port))
 {
+	ConnectionObject = std::make_shared<pqxx::connection>(connectionString.c_str());
 }
 
 void server::Start()
 {
 	std::cout << "Server started! Listen " << port << " port" << std::endl;
-	ClientSession* new_session = new ClientSession(this, io_service_);
+	ClientSession* new_session = new ClientSession(this, io_service);
 	acceptor_.async_accept(new_session->GetSocket(),
 		boost::bind(&server::handle_accept, this, new_session,
 			boost::asio::placeholders::error));
 
-	ConnectionObject = std::make_shared<pqxx::connection>(connectionString.c_str());
-	Transaction = std::make_shared<pqxx::work>(*ConnectionObject);
+	io_service.run();
 }
 
 void server::Stop()
 {
+	io_service.stop();
 	acceptor_.close();
-	ConnectionObject.reset();
-	Transaction.reset();
 }
 
 void server::handle_accept(ClientSession* new_session, const boost::system::error_code& error)
@@ -258,7 +192,7 @@ void server::handle_accept(ClientSession* new_session, const boost::system::erro
         new_session->Start();
 
         /*do ping every N seconds*/
-        new_session = new ClientSession(this, io_service_);
+        new_session = new ClientSession(this, io_service);
         acceptor_.async_accept(new_session->GetSocket(),
             boost::bind(&server::handle_accept, this, new_session,
                 boost::asio::placeholders::error));
@@ -302,28 +236,30 @@ void server::Execute_AddOrder(ClientSession* InSession, std::string Msg)
 		const int64_t Price = std::atoi(CommandList[2].c_str());
 		
 		/*add order to order table*/
-		SQL_Request("INSERT INTO orders (type, value, price, user_id) VALUES ('%s', %i, %i, %i)",
+		auto r = SQL_Request(true, "INSERT INTO orders (type, value, price, user_id) VALUES ('%s', %i, %i, %i)",
 			CommandList[0].c_str(), Value, Price, InSession->GetUserID());
-
-		auto r = SQL_Request("SELECT COUNT(*) FROM orders");
+		r = SQL_Request(false, "SELECT MAX(order_id) FROM orders WHERE user_id = %d", InSession->GetUserID());
 		
 		/*add order to user list*/
-		SQL_Request("UPDATE users SET active_orders = ARRAY[%d] || active_orders WHERE id = %d", r.affected_rows(), InSession->GetUserID());
+		SQL_Request(true, "UPDATE users SET active_orders = ARRAY[%d] || active_orders WHERE id = %d",std::atoi( r[0][0].c_str()), InSession->GetUserID());
+		
 		reply_body = "Order successfully added";
 		
-		//OnOrderAdded(j["UserId"]);
+		Handle_OrderAdded(InSession);
 	}
 	RequestQueue.front().SessionCallback(reply_body);
 }
 void server::Execute_RemoveOrder(ClientSession* InSession, std::string Msg)
 {
-	std::string reply_body = "Unknown error \n";
-	/*const auto OrderList = GetCore().GetUserOrdersIDList(j["UserId"]);
-	if (OrderIdx >= 0 && OrderList.size() > OrderIdx)
+	std::string reply_body = "Error: row not found \n";
+
+	const int64_t OrderIdx = std::atoi(Msg.c_str());
+	auto r = SQL_Request(true, "UPDATE orders SET status = 'canceled' WHERE user_id = %d AND order_id = %d", InSession->GetUserID(), OrderIdx);
+	if(r.affected_rows() > 0)
 	{
-		GetCore().RemoveOrder(j["UserId"], OrderList[OrderIdx]);
-		NewReply.reply_body = "Order was removed successfully \n";
-	}*/
+		SQL_Request(true, "UPDATE users SET active_orders = ARRAY_REMOVE(active_orders, %d) WHERE id = %d", OrderIdx, InSession->GetUserID());
+		reply_body = "Order was removed";
+	}
 	RequestQueue.front().SessionCallback(reply_body);
 }
 
@@ -336,18 +272,13 @@ void server::Execute_Registration(ClientSession* InSession, std::string Msg)
 	boost::split(CommandList, Msg, boost::is_any_of(" "));
         	
 	/*if username is empty - allow to create*/
-	pqxx::result r = SQL_Request("SELECT id FROM users WHERE username = '%s'", CommandList[0].c_str());
+	pqxx::result r = SQL_Request(false, "SELECT id FROM users WHERE username = '%s'", CommandList[0].c_str());
 	if(r.affected_rows() == 0)
 	{
-		r = SQL_Request("SELECT MAX(id) FROM users");
-		uint64_t ID = 0;
-		if(!r.empty())
-		{
-			ID = std::atoi(r[0][0].c_str()) + 1;
-		}
-		SQL_Request("INSERT INTO users (id, username, password) VALUES (%d,'%s','%s')", ID, CommandList[0].c_str(), CommandList[1].c_str());
-		Transaction->commit();
-		reply_body = "OK " + std::to_string(ID);
+		r = SQL_Request(false, "SELECT MAX(id) FROM users");
+		SQL_Request(true, "INSERT INTO users (username, password) VALUES ('%s','%s')", CommandList[0].c_str(), CommandList[1].c_str());
+		auto ID = SQL_Request(true, "SELECT id FROM users WHERE username = '%s'", CommandList[0].c_str())[0][0].c_str();
+		reply_body = "OK " + std::string(ID);
 	}
 	else
 	{
@@ -362,7 +293,7 @@ void server::Execute_Authorization(ClientSession *InSession, std::string Msg)
 	std::string reply_body = "Unknown error \n";
 
 	/*if username is empty - allow to create*/
-	pqxx::result r = SQL_Request("SELECT id FROM users WHERE username = '%s' AND password = '%s'", CommandList[0].c_str(), CommandList[1].c_str());
+	pqxx::result r = SQL_Request(false, "SELECT id FROM users WHERE username = '%s' AND password = '%s'", CommandList[0].c_str(), CommandList[1].c_str());
 	if(r.affected_rows() != 0)
 	{
 		const uint64_t ID = std::atoi(r[0][0].c_str());
@@ -380,7 +311,7 @@ void server::Execute_Balance(ClientSession* InSession, std::string Msg)
 	auto User = InSession->GetUserID();
 	std::string reply_body = "Unknown error \n";
 
-	pqxx::result r = SQL_Request("SELECT balance_usd, balance_rub FROM users WHERE id = '%d'", User);
+	pqxx::result r = SQL_Request(false, "SELECT balance_usd, balance_rub FROM users WHERE id = '%d'", User);
 	if(r.affected_rows() != 0)
 	{
 		reply_body = std::format("USD: {} RUB: {}", r[0][0].c_str(), r[0][1].c_str());
@@ -394,19 +325,105 @@ void server::Execute_Balance(ClientSession* InSession, std::string Msg)
 
 void server::Execute_OrderList(ClientSession *InSession, std::string Msg)
 {
-	/*NewReply.user = GetCore().GetUsername(j["UserId"]);
-			 NewReply.reply_body = "OrderList:\n";
- 
-			 const auto OrderList = GetCore().GetUserOrderList(j["UserId"]);
-			 for (uint64_t OrderIt = 0; OrderIt < OrderList.size(); OrderIt++)
-			 {
-				 NewReply.reply_body += std::to_string(OrderIt) + " ";
- 
-				 const OrderInfo& Order = OrderList[OrderIt];
-				 NewReply.reply_body += Order.Type == OrderType::BUY ? "BUY " : "SELL ";
-				 NewReply.reply_body += std::to_string(Order.Val_USD) + " USD ";
-				 NewReply.reply_body += std::to_string(Order.Val_RUB) + " RUB ";
-				 NewReply.reply_body += to_simple_string(Order.Timestamp);
-				 NewReply.reply_body += "\n";
-			 }*/
+	auto User = InSession->GetUserID();
+
+	pqxx::result r = SQL_Request(false, "SELECT * FROM orders WHERE user_id = '%d' AND status = 'active'", User);
+	std::string reply_body = "\n";
+	for (uint64_t OrderIt = 0; OrderIt < r.affected_rows(); OrderIt++)
+	{
+		reply_body += r[OrderIt][6].c_str() + std::string(" ");
+		reply_body += r[OrderIt][0].c_str() + std::string(" ");
+		reply_body += r[OrderIt][1].c_str() + std::string(" USD ");
+		reply_body += r[OrderIt][2].c_str() + std::string(" RUB ");
+		reply_body += "\n";
+	}
+	RequestQueue.front().SessionCallback(reply_body);
+}
+
+void server::Handle_OrderAdded(ClientSession *InSession)
+{
+	auto r = SQL_Request(false, "SELECT MAX(order_id) FROM orders WHERE user_id = %d AND status = 'active'", InSession->GetUserID());
+
+	/*Get all orders, which is not of current user, sorted by lowest (for buyer) or highest(for salers), but not more/less*/
+	uint32_t OrderID = r[0][0].as<uint32_t>();
+	auto Order = SQL_Request(false, "SELECT * FROM orders WHERE order_id = %d", OrderID)[0];
+
+	std::string Type = Order[0].as<std::string>();
+	const bool bIsBuyer = Type == "BUY";
+	if(bIsBuyer)
+	{
+		r = SQL_Request(false, "SELECT * FROM orders WHERE type = 'SELL' AND user_id != %d AND status = 'active' ORDER BY price ASC, order_id DESC", InSession->GetUserID());
+	}
+	else
+	{
+		r = SQL_Request(false, "SELECT * FROM orders WHERE type = 'BUY' AND user_id != %d AND status = 'active' ORDER BY price DESC, order_id ASC", InSession->GetUserID());
+	}
+
+	/*while its still enough money - make a deals*/
+	for(uint64_t It = 0; It < r.affected_rows(); It++)
+	{
+		if(bIsBuyer)
+		{
+			Handle_MakeMatch(Order, r[It]);
+		}
+		else
+		{
+			Handle_MakeMatch(r[It], Order);
+		}
+		auto Status = SQL_Request(false, "SELECT status FROM orders WHERE order_id = %d", OrderID)[0][0].as<std::string>();
+		if(Status != "active") break;
+
+		/*update order data*/
+		Order = SQL_Request(false, "SELECT * FROM orders WHERE order_id = %d", OrderID)[0];
+	}
+}
+
+void server::Handle_MakeMatch(const pqxx::row& BuyOrder, const pqxx::row& SellOrder)
+{
+	/*Buyer*/
+	auto BuyerValue = std::atoi(BuyOrder[1].c_str());
+	auto BuyerPrice = std::atoi(BuyOrder[2].c_str());
+
+	/*Seller*/
+	auto SellerValue = std::atoi(SellOrder[1].c_str());
+	auto SellerPrice = std::atoi(SellOrder[2].c_str());
+	
+	auto DeltaValue = std::min(BuyerValue, SellerValue);
+
+	auto BuyerID = BuyOrder[3].as<int64_t>();
+	auto BuyOrderID = BuyOrder[6].as<int64_t>();
+	auto SellerID = SellOrder[3].as<int64_t>();
+	auto SellOrderID = SellOrder[6].as<int64_t>();
+
+	/*Update order value*/
+	SQL_Request(true, "UPDATE orders SET value = %d WHERE order_id = %d", BuyerValue - DeltaValue, BuyOrderID);
+	SQL_Request(true, "UPDATE orders SET value = %d WHERE order_id = %d", SellerValue - DeltaValue, SellOrderID);
+
+	/*If order is reached 0 - close it*/
+	auto BuyOrderUpdated = SQL_Request(false, "SELECT value FROM orders WHERE order_id = '%d'", BuyOrderID);
+	if(BuyOrderUpdated[0][0].as<int64_t>() == 0)
+	{
+		/*CloseOrder*/
+		auto r = SQL_Request(true, "UPDATE orders SET status = 'completed' WHERE order_id = %d", BuyOrderID);
+		if(r.affected_rows() > 0)
+		{
+			SQL_Request(true, "UPDATE users SET active_orders = ARRAY_REMOVE(active_orders, %d) WHERE id = %d", BuyOrderID, BuyerID);
+		}
+	}
+	auto SellOrderUpdated = SQL_Request(false, "SELECT value FROM orders WHERE order_id = '%d'", SellOrderID);
+	if(SellOrderUpdated[0][0].as<int64_t>() == 0)
+	{
+		/*CloseOrder*/
+		auto r = SQL_Request(true, "UPDATE orders SET status = 'completed' WHERE order_id = %d", SellOrderID);
+		if(r.affected_rows() > 0)
+		{
+			SQL_Request(true, "UPDATE users SET active_orders = ARRAY_REMOVE(active_orders, %d) WHERE id = %d", SellOrderID, SellerID);
+		}
+	}
+		
+	/*Update balances*/
+	SQL_Request(true, "UPDATE users SET balance_rub = balance_rub - %d, balance_usd = balance_usd + %d WHERE id = %d",
+		DeltaValue * BuyerPrice, DeltaValue, BuyerID);
+	SQL_Request(true, "UPDATE users SET balance_rub = balance_rub + %d, balance_usd = balance_usd - %d WHERE id = %d",
+		DeltaValue * BuyerPrice, DeltaValue, SellerID);
 }

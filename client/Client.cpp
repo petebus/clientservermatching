@@ -32,8 +32,7 @@ void Client::SendPing()
 	std::string Result = ReadMessage();
 	if(Result == "OK")
 	{
-		delete PingTimer;
-		PingTimer = new boost::asio::deadline_timer(io_service, boost::posix_time::seconds(1));
+		PingTimer = std::make_shared<boost::asio::deadline_timer>(io_service, boost::posix_time::seconds(1));
 		PingTimer->async_wait(boost::bind(&Client::SendPing, this));
 	}
 	else
@@ -105,31 +104,37 @@ string Client::GetBalance()
 
 void Client::Connect()
 {
-	const std::lock_guard LockGuard(Lock);
-
-    resolver = new tcp::resolver(io_service);
-    query = new tcp::resolver::query(tcp::v4(), "127.0.0.1", std::to_string(port));
-    iterator = new tcp::resolver::iterator(resolver->resolve(*query));
+	if(bConnected) return;
+	
+    resolver = std::make_shared<tcp::resolver>(io_service);
+    query = std::make_shared<tcp::resolver::query>(tcp::v4(), "127.0.0.1", std::to_string(port));
+    iterator = std::make_shared<tcp::resolver::iterator>(resolver->resolve(*query));
     s = make_unique<tcp::socket>(io_service);
     s->connect(**iterator);
 
 	/*Start ping requests*/
-	PingTimer = new boost::asio::deadline_timer(io_service, boost::posix_time::seconds(1));
+	PingTimer = std::make_shared<boost::asio::deadline_timer>(io_service, boost::posix_time::seconds(1));
 	PingTimer->async_wait(boost::bind(&Client::SendPing, this));
 
 	bConnected = true;
-	io_service.run();
+	IO_Thread = std::make_shared<std::thread>([&]()
+	{
+		io_service.run();
+	});
 }
 
 void Client::Disconnect()
 {
+	if(!bConnected) return;
+	
 	bConnected = false;
 	io_service.stop();
+	IO_Thread.get()->join();
 	s->close();
 	s.reset();
-	delete iterator;
-	delete resolver;
-	delete query;
-	delete PingTimer;
+	iterator.reset();
+	resolver.reset();
+	query.reset();
+	PingTimer.reset();
 }
 
