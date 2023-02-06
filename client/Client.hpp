@@ -1,7 +1,6 @@
 #pragma once
 #include <boost/asio.hpp>
-
-#include "Common.hpp"
+#include "common.hpp"
 
 using boost::asio::ip::tcp;
 using namespace std;

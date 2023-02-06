@@ -291,7 +291,7 @@ void server::Execute_AddOrder(ClientSession* InSession, std::string Msg)
 		
 		/*add order to order table*/
 		SQL_Request("INSERT INTO orders (type, value, price, user_id) VALUES ('%s', %i, %i, %i)",
-			CommandList[0].c_str(), Value, Price, InSession->GetUserID(), boost::posix_time::microsec_clock::universal_time());
+			CommandList[0].c_str(), Value, Price, InSession->GetUserID());
 
 		auto r = SQL_Request("SELECT COUNT(*) FROM orders");
 		
