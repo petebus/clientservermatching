@@ -36,10 +36,10 @@ void ClientSession::Start()
 void ClientSession::handle_read(const boost::system::error_code& error,
     size_t bytes_transferred)
 {
-	const std::lock_guard LockGuard(Lock);
-
     if (!error)
     {
+    	std::lock_guard LockGuard(Lock);
+
 	    /*Parse json*/
     	DataBuffer[bytes_transferred] = '\0';
     	
@@ -156,7 +156,7 @@ void ClientSession::handle_write(const boost::system::error_code& error)
 }
 void ClientSession::handle_connection_timeout(const boost::system::error_code& error)
 {
-	const std::lock_guard LockGuard(Lock);
+	//const std::lock_guard LockGuard(Lock);
 	if(error.failed()) return;
 	std::cout << "Connection is lost" << std::endl;
 }
@@ -230,15 +230,27 @@ server::server(boost::asio::io_service& io_service)
     : io_service_(io_service),
     acceptor_(io_service, tcp::endpoint(tcp::v4(), port))
 {
-    std::cout << "Server started! Listen " << port << " port" << std::endl;
-    ClientSession* new_session = new ClientSession(this, io_service_);
-    acceptor_.async_accept(new_session->GetSocket(),
-        boost::bind(&server::handle_accept, this, new_session,
-            boost::asio::placeholders::error));
-
-	ConnectionObject = new pqxx::connection(connectionString.c_str());
-	Transaction = new pqxx::work(*ConnectionObject);
 }
+
+void server::Start()
+{
+	std::cout << "Server started! Listen " << port << " port" << std::endl;
+	ClientSession* new_session = new ClientSession(this, io_service_);
+	acceptor_.async_accept(new_session->GetSocket(),
+		boost::bind(&server::handle_accept, this, new_session,
+			boost::asio::placeholders::error));
+
+	ConnectionObject = std::make_shared<pqxx::connection>(connectionString.c_str());
+	Transaction = std::make_shared<pqxx::work>(*ConnectionObject);
+}
+
+void server::Stop()
+{
+	acceptor_.close();
+	ConnectionObject.reset();
+	Transaction.reset();
+}
+
 void server::handle_accept(ClientSession* new_session, const boost::system::error_code& error)
 {
     if (!error)
@@ -264,7 +276,7 @@ void server::handle_end_connection(ClientSession *InSession)
 void server::Request(ClientSession* InSession, std::string Msg, ExecuteSignature InExecuteMethod,
 	CallbackSignature SessionCallback)
 {
-	const std::lock_guard LockGuard(RequestLock);
+	//const std::lock_guard LockGuard(RequestLock);
 	
 	RequestQueue.push(QueuedRequest(InSession, InExecuteMethod, SessionCallback));
 	if(RequestQueue.front().Session)

@@ -17,6 +17,7 @@ public:
     Client() : s(nullptr), resolver(nullptr), query(nullptr), iterator(nullptr)  {}
     virtual ~Client() {}
 	void Connect();
+	void Disconnect();
 	
 	/*Login methods*/
 	string Authorize(const std::string& Username, const std::string& Password);

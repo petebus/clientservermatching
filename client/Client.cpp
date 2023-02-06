@@ -105,6 +105,8 @@ string Client::GetBalance()
 
 void Client::Connect()
 {
+	const std::lock_guard LockGuard(Lock);
+
     resolver = new tcp::resolver(io_service);
     query = new tcp::resolver::query(tcp::v4(), "127.0.0.1", std::to_string(port));
     iterator = new tcp::resolver::iterator(resolver->resolve(*query));
@@ -117,5 +119,17 @@ void Client::Connect()
 
 	bConnected = true;
 	io_service.run();
+}
+
+void Client::Disconnect()
+{
+	bConnected = false;
+	io_service.stop();
+	s->close();
+	s.reset();
+	delete iterator;
+	delete resolver;
+	delete query;
+	delete PingTimer;
 }
 

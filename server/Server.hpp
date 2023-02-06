@@ -62,6 +62,9 @@ class server
 public:
     server(boost::asio::io_service& io_service);
 
+	void Start();
+	void Stop();
+
 	void handle_accept(ClientSession* new_session, const boost::system::error_code& error);
 	void handle_end_connection(ClientSession* InSession);
 	
@@ -74,6 +77,10 @@ public:
 	void Execute_Authorization(ClientSession* InSession, std::string Msg);
 	void Execute_Balance(ClientSession* InSession, std::string Msg);
 	void Execute_OrderList(ClientSession* InSession, std::string Msg);
+
+	pqxx::connection* GetConnection() {
+		return ConnectionObject.get();
+	}
 
 private:
 	
@@ -88,8 +95,8 @@ private:
 		pqxx::result Result = Transaction->exec(FullRequest);
 		return Result;
 	}
-	pqxx::connection* ConnectionObject;
-	pqxx::work* Transaction;
+	std::shared_ptr<pqxx::connection> ConnectionObject;
+	std::shared_ptr<pqxx::work> Transaction;
 	
     boost::asio::io_service& io_service_;
     tcp::acceptor acceptor_;
