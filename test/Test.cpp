@@ -39,13 +39,40 @@ BOOST_AUTO_TEST_CASE(ConnectionTest)
 	std::this_thread::sleep_for(chrono::milliseconds(100));
 	BOOST_CHECK(!cl.IsConnected());
 }
-BOOST_FIXTURE_TEST_CASE(Authorization, ClientServerFixture)
+
+BOOST_FIXTURE_TEST_CASE(AuthorizationOrRegister, ClientServerFixture)
 {
-	
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("1", "1");
+	if (!cl.IsAuthorized()) cl.Register("1", "1");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.Disconnect();
 }
+
 BOOST_FIXTURE_TEST_CASE(AddOrder, ClientServerFixture)
 {
-	
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("1", "1");
+	if (!cl.IsAuthorized()) cl.Register("1", "1");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.AddOrder("BUY 100 76");
+	cl.Disconnect();
+}
+
+BOOST_FIXTURE_TEST_CASE(RemoveOrder, ClientServerFixture)
+{
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("1", "1");
+	if (!cl.IsAuthorized()) cl.Register("1", "1");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.RemoveOrder("1");
+	cl.Disconnect();
 }
 
 BOOST_FIXTURE_TEST_CASE(TestScenario, ClientServerFixture)
