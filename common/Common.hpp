@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
-static short port = 5555;
-static std::string connectionString = "host=localhost port=5433 dbname=postgres user=postgres password=11111";
+static short port = 5433;
+static std::string connectionString = "host=localhost port=5432 dbname=postgres user=postgres password=admin";
 static uint16_t ConnectionTimeoutDelay = 5000;
 
 namespace Requests

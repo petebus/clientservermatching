@@ -38,6 +38,7 @@ public:
 	string RemoveOrder(const std::string& OrderIdx);
 	string GetBalance();
 	string GetOrderList();
+	string GetQuotes();
 	
 private:
 	void Send(const std::string& aRequestType, const std::string& aMessage);

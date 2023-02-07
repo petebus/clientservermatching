@@ -94,6 +94,14 @@ string Client::GetOrderList()
 	return Result;
 }
 
+string Client::GetQuotes()
+{
+	const std::lock_guard LockGuard(Lock);
+	Send(Requests::Quotes, "");
+	std::string Result = ReadMessage();
+	return Result;
+}
+
 string Client::GetBalance()
 {
 	const std::lock_guard LockGuard(Lock);

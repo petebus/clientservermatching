@@ -76,6 +76,7 @@ public:
 	void Execute_Authorization(ClientSession* InSession, std::string Msg);
 	void Execute_Balance(ClientSession* InSession, std::string Msg);
 	void Execute_OrderList(ClientSession* InSession, std::string Msg);
+	void Execute_Quotes(ClientSession* InSession, std::string Msg);
 
 private:
 	void Handle_OrderAdded(ClientSession* InSession);
@@ -95,7 +96,9 @@ private:
 		return Result;
 	}
 	std::shared_ptr<pqxx::connection> ConnectionObject;
-	
+	int Bid{ 0 }, Offer{ 0 };
+
+
     boost::asio::io_service& io_service;
     tcp::acceptor acceptor_;
 

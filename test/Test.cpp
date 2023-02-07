@@ -102,6 +102,28 @@ BOOST_FIXTURE_TEST_CASE(TestScenario, ClientServerFixture)
 	if(!cl.IsAuthorized()) cl.Register("3", "3");
 	BOOST_CHECK(cl.IsAuthorized());
 	cl.AddOrder("SELL 50 63");
+	cl.GetQuotes();
+	cl.Disconnect();
+}
+
+BOOST_FIXTURE_TEST_CASE(TestSpread, ClientServerFixture)
+{
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("1", "1");
+	if (!cl.IsAuthorized()) cl.Register("1", "1");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.AddOrder("BUY 10 62");
+	cl.Disconnect();
+
+	cl.Connect();
+	std::this_thread::sleep_for(chrono::milliseconds(100));
+	BOOST_CHECK(cl.IsConnected());
+	cl.Authorize("2", "2");
+	if (!cl.IsAuthorized()) cl.Register("2", "2");
+	BOOST_CHECK(cl.IsAuthorized());
+	cl.AddOrder("BUY 20 70");
 	cl.Disconnect();
 }
 

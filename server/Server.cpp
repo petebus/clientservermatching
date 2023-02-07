@@ -8,6 +8,8 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include "Common.hpp"
 
+static const auto SpreadValue = 6;
+
 void ClientSession::Start()
 {
     Socket.async_read_some(boost::asio::buffer(DataBuffer, MaxBufferLength),
@@ -125,6 +127,11 @@ void ClientSession::handle_read(const boost::system::error_code& error,
     		MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, OrderList, j["Message"]);
     		return;
     	}
+		else if (reqType == Requests::Quotes)
+		{
+			MAKE_SIMPLE_CALLBACK_REQUEST(OuterServer, Quotes, j["Message"]);
+			return;
+		}
     	Callback(reply_body);
     }
     else
@@ -340,6 +347,20 @@ void server::Execute_OrderList(ClientSession *InSession, std::string Msg)
 	RequestQueue.front().SessionCallback(reply_body);
 }
 
+void server::Execute_Quotes(ClientSession* InSession, std::string Msg)
+{
+	std::string reply_body = "Unknown error \n";
+	if (Bid > 0 && Offer > 0)
+	{
+		reply_body = std::format("Bid: {} Offer: {}", Bid, Offer);
+	}
+	else
+	{
+		reply_body = "Error: we have no market";
+	}
+	RequestQueue.front().SessionCallback(reply_body);
+}
+
 void server::Handle_OrderAdded(ClientSession *InSession)
 {
 	auto r = SQL_Request(false, "SELECT MAX(order_id) FROM orders WHERE user_id = %d AND status = 'active'", InSession->GetUserID());
@@ -381,19 +402,25 @@ void server::Handle_OrderAdded(ClientSession *InSession)
 void server::Handle_MakeMatch(const pqxx::row& BuyOrder, const pqxx::row& SellOrder)
 {
 	/*Buyer*/
-	auto BuyerValue = std::atoi(BuyOrder[1].c_str());
-	auto BuyerPrice = std::atoi(BuyOrder[2].c_str());
+	const auto BuyerValue = std::atoi(BuyOrder[1].c_str());
+	const auto BuyerPrice = std::atoi(BuyOrder[2].c_str());
 
 	/*Seller*/
-	auto SellerValue = std::atoi(SellOrder[1].c_str());
-	auto SellerPrice = std::atoi(SellOrder[2].c_str());
+	const auto SellerValue = std::atoi(SellOrder[1].c_str());
+	const auto SellerPrice = std::atoi(SellOrder[2].c_str());
 	
-	auto DeltaValue = std::min(BuyerValue, SellerValue);
+	const auto DeltaValue = std::min(BuyerValue, SellerValue);
 
-	auto BuyerID = BuyOrder[3].as<int64_t>();
-	auto BuyOrderID = BuyOrder[6].as<int64_t>();
-	auto SellerID = SellOrder[3].as<int64_t>();
-	auto SellOrderID = SellOrder[6].as<int64_t>();
+	const auto BuyerID = BuyOrder[3].as<int64_t>();
+	const auto BuyOrderID = BuyOrder[6].as<int64_t>();
+	const auto SellerID = SellOrder[3].as<int64_t>();
+	const auto SellOrderID = SellOrder[6].as<int64_t>();
+
+	const auto Spread = abs(BuyerPrice - SellerPrice);
+
+	/*We will don't match orders if spread above SpreadValue*/
+	if (Spread > SpreadValue)
+		return;
 
 	/*Update order value*/
 	SQL_Request(true, "UPDATE orders SET value = %d WHERE order_id = %d", BuyerValue - DeltaValue, BuyOrderID);
@@ -426,4 +453,15 @@ void server::Handle_MakeMatch(const pqxx::row& BuyOrder, const pqxx::row& SellOr
 		DeltaValue * BuyerPrice, DeltaValue, BuyerID);
 	SQL_Request(true, "UPDATE users SET balance_rub = balance_rub + %d, balance_usd = balance_usd - %d WHERE id = %d",
 		DeltaValue * BuyerPrice, DeltaValue, SellerID);
+
+	SQL_Request(true, "INSERT INTO matches (buyer, seller, value, price) VALUES (%i, %i, %i, %i)",
+		BuyerID, SellerID, DeltaValue, DeltaValue * BuyerPrice);
+
+	/*Market make*/
+	Bid = DeltaValue;
+	Offer = std::max(BuyerValue, SellerValue);
+
+	//const auto Offer = std::max(BuyerValue, SellerValue);
+
+	//auto Quote = DeltaValue + floor((Offer - DeltaValue) / 2);
 }

@@ -89,7 +89,8 @@ int main()
 				"2) Remove order\n"
 				"3) Balance\n"
 				"4) Order List\n"
-				"5) Exit\n"
+				"5) Show quotes\n"
+				"6) Exit\n"
 				<< std::endl;
 
 			short menu_option_num;
@@ -132,6 +133,11 @@ int main()
 					break;
 				}
 				case 5:
+				{
+					std::cout << cl.GetQuotes() << std::endl;
+					break;
+				}
+				case 6:
 				{
 					exit(0);
 					break;
