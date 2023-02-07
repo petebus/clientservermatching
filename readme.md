@@ -25,7 +25,8 @@ Next, you'll see a menu options list:
 2. Delete order
 3. Show balance
 4. Show order list
-5. Exit
+5. Show quotes
+6. Exit
 
 The order adding format looks: "BUY/SELL volume (in USD) price (in RUB)".
 
