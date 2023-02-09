@@ -17,7 +17,7 @@ Require C++20.
 
 ---
 
-### How it works?
+### How does it work?
 
 When you enter the program, you will be prompted with an authorization form. If you are already registered, select the first option and log in.
 Next, you'll see a menu options list:

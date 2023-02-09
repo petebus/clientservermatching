@@ -8,7 +8,7 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include "Common.hpp"
 
-static const auto SpreadValue = 6;
+static constexpr auto SpreadValue = 6;
 
 void ClientSession::Start()
 {

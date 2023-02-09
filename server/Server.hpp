@@ -53,8 +53,8 @@ private:
 	std::mutex Lock;
 };
 
-typedef boost::function<void (ClientSession*, std::string)> ExecuteSignature;
-typedef boost::function<void (std::string)> CallbackSignature;
+using ExecuteSignature = boost::function<void (ClientSession*, std::string)>;
+using CallbackSignature = boost::function<void (std::string)>;
 
 class server
 {
